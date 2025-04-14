@@ -24,10 +24,10 @@ Our models help chart the amplitude, frequency content, and location of electrom
 
 ## Repository Structure
 
-The primary focus of this project is on modeling distribution transformers, with the main code located in:
+The primary focus of this project is on modeling distribution transformers, with the assignment and starting code located in:
 
 ```
-project-based-assignment/modeling_distribution_transformer/
+modeling_distribution_transformer/
 ```
 
 ## Getting Started & Development Setup
