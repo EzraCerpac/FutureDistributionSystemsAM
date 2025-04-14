@@ -68,19 +68,20 @@ This setup will only download the files in the modeling_distribution_transformer
 
 ## Collaboration Guidelines
 
-This repository is a fork of the original project for collaborative development. To contribute:
+This repository is set up for collaborative development. To contribute:
 
-1. **Upstream Repository**: The original work is maintained at [ziolai/finite_element_electrical_engineering](https://github.com/ziolai/finite_element_electrical_engineering)
+1. **Repository Access**:
+   - Request access to collaborate directly or fork the repository
+   - Use pull requests for significant changes
 
-2. **Fork Workflow**:
-   - This repository (origin) contains our collaborative work
-   - The upstream repository contains the original project
-   - Pull from upstream to get updates: `git pull upstream master`
-   - Push to origin to share your work: `git push origin master`
+2. **Workflow**:
+   - Clone the repository using the instructions above
+   - Create feature branches for new development
+   - Push your changes to the repository: `git push origin master` or `git push origin your-feature-branch`
 
 3. **Code Contributions**:
    - Focus on the sparse-checkout path for most work
-   - When adding global files (like .gitignore), temporarily disable sparse-checkout
+   - When adding global files (like .gitignore), temporarily disable sparse-checkout with `git sparse-checkout disable`
    - Follow Julia style guidelines for code contributions
    - Document your work in Jupyter notebooks
 
@@ -106,7 +107,7 @@ The implementation focuses on:
 
 ## Credits and References
 
-This work builds upon previous research:
+This work builds upon previous academic research:
 
 - Master thesis by Max van Dijk at TU Delft
 - Previous implementations by Gijs Lagerweij
@@ -119,6 +120,3 @@ This work builds upon previous research:
 
 ### Key References
 - [Max van Dijk's Master Thesis](https://repository.tudelft.nl/islandora/object/uuid%3A15b25b42-e04b-4ff2-a187-773bc170f061?collection=education)
-- [Previous work by Rahul Rane](https://github.com/rahulmrane/fem_future_distribution_grids)
-- [Previous assignments by Gijs Lageweij](https://github.com/gijswl/ee4375_fem_ta)
-- [Previous assignments by Philip Soliman and Auke Schaap](https://github.com/aukeschaap/am-transformers)
