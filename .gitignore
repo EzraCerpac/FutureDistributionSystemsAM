@@ -1,2 +1,267 @@
-.ipynb_checkpoints
+# JetBrains IDEs
+.idea/
+*.iml
+*.iws
+*.ipr
+*.iws
+.idea_modules/
+out/
+
+# VSCode
+.vscode/
+*.code-workspace
+.history/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.pytest_cache/
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Julia
+*.jl.cov
+*.jl.*.cov
+*.jl.mem
+deps/deps.jl
 Manifest.toml
+
+# Jupyter Notebooks
+.ipynb_checkpoints
+*/.ipynb_checkpoints/*
+profile_default/
+ipython_config.py
+
+# LaTeX
+## Core latex/pdflatex auxiliary files:
+*.aux
+*.lof
+*.log
+*.lot
+*.fls
+*.out
+*.toc
+*.fmt
+*.fot
+*.cb
+*.cb2
+.*.lb
+## Bibliography auxiliary files (bibtex/biblatex/biber):
+*.bbl
+*.bcf
+*.blg
+*-blx.aux
+*-blx.bib
+*.run.xml
+## Build tool auxiliary files:
+*.fdb_latexmk
+*.synctex
+*.synctex(busy)
+*.synctex.gz
+*.synctex.gz(busy)
+*.pdfsync
+## Build tool directories for auxiliary files:
+# latexrun
+latex.out/
+## Auxiliary and intermediate files from other packages:
+# algorithms
+*.alg
+*.loa
+# achemso
+acs-*.bib
+# amsthm
+*.thm
+# beamer
+*.nav
+*.pre
+*.snm
+*.vrb
+# changes
+*.soc
+# comment
+*.cut
+# cprotect
+*.cpt
+# elsarticle (documentclass of Elsevier journals)
+*.spl
+# endnotes
+*.ent
+# fixme
+*.lox
+# feynmf/feynmp
+*.mf
+*.mp
+*.t[1-9]
+*.t[1-9][0-9]
+*.tfm
+# glossaries
+*.acn
+*.acr
+*.glg
+*.glo
+*.gls
+*.glsdefs
+# gnuplottex
+*-gnuplottex-*
+# gregoriotex
+*.gaux
+*.glog
+*.gtex
+# htlatex
+*.4ct
+*.4tc
+*.idv
+*.lg
+*.trc
+*.xref
+# hyperref
+*.brf
+# knitr
+*-concordance.tex
+# listings
+*.lol
+# makeidx
+*.idx
+*.ilg
+*.ind
+*.ist
+# minitoc
+*.maf
+*.mlf
+*.mlt
+*.mtc[0-9]*
+*.slf[0-9]*
+*.slt[0-9]*
+*.stc[0-9]*
+# minted
+_minted*
+*.pyg
+# morewrites
+*.mw
+# newpax
+*.newpax
+# nomencl
+*.nlg
+*.nlo
+*.nls
+# pax
+*.pax
+# pdfpcnotes
+*.pdfpc
+# sagetex
+*.sagetex.sage
+*.sagetex.py
+*.sagetex.scmd
+# scrwfile
+*.wrt
+# svg
+svg-inkscape/
+# sympy
+*.sout
+*.sympy
+sympy-plots-for-*.tex/
+# pdfcomment
+*.upa
+*.upb
+# pythontex
+*.pytxcode
+pythontex-files-*/
+# tcolorbox
+*.listing
+# thmtools
+*.loe
+# TikZ & PGF
+*.dpth
+*.md5
+*.auxlock
+# titletoc
+*.ptc
+# todonotes
+*.tdo
+# vhistory
+*.hst
+*.ver
+# easy-todo
+*.lod
+# xcolor
+*.xcp
+# xmpincl
+*.xmpi
+# xindy
+*.xdy
+# xypic precompiled matrices and outlines
+*.xyc
+*.xyd
+# pdftex
+*.pdftex
+# luatex
+*.luatex
+# htlatex
+*.html
+*.css
+# glossaries
+*.acn
+*.acr
+*.glg
+*.glo
+*.gls
+*.glsdefs
+# gnuplottex
+*-gnuplottex-*
+# hyperref
+*.brf
+# beamer
+*.nav
+*.snm
+*.vrb
+# threeqed
+*.thrm
+# miscellaneous
+*.spl
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
