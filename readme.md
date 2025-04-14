@@ -22,30 +22,13 @@ This project aims to develop comprehensive models for analyzing power transforme
 
 Our models help chart the amplitude, frequency content, and location of electromagnetic losses, which is essential for monitoring the life-time expectancy of assets in the distribution grid.
 
-## Repository Structure and Sparse-Checkout Setup
+## Repository Structure
 
-This repository is configured with sparse-checkout to focus on the core modeling components. Currently, we're primarily working with:
+The primary focus of this project is on modeling distribution transformers, with the main code located in:
 
 ```
 project-based-assignment/modeling_distribution_transformer/
 ```
-
-### Sparse Checkout Configuration
-
-If you're cloning this repository, you can use sparse-checkout to only download the relevant files:
-
-```bash
-# Clone the repository
-git clone https://github.com/EzraCerpac/FutureDistributionSystemsAM.git
-cd FutureDistributionSystemsAM
-
-# Configure sparse-checkout
-git config core.sparseCheckout true
-echo "project-based-assignment/modeling_distribution_transformer/" > .git/info/sparse-checkout
-git pull origin master
-```
-
-This setup will only download the files in the modeling_distribution_transformer directory, saving bandwidth and disk space.
 
 ## Getting Started & Development Setup
 
@@ -57,33 +40,20 @@ This setup will only download the files in the modeling_distribution_transformer
 
 ### Installation
 
-1. Clone the repository with sparse-checkout as described above
-2. Install required Julia packages:
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/EzraCerpac/FutureDistributionSystemsAM.git
+   cd FutureDistributionSystemsAM
+   ```
+
+2. Install required Julia packages using the Project.toml file:
    ```julia
    using Pkg
-   Pkg.add(["Gridap", "Ferrite", "DifferentialEquations", "HarmonicBalance"])
+   Pkg.activate(".")
+   Pkg.instantiate()
    ```
 
 3. For mesh generation, install GMSH: https://gmsh.info/
-
-## Collaboration Guidelines
-
-This repository is set up for collaborative development. To contribute:
-
-1. **Repository Access**:
-   - Request access to collaborate directly or fork the repository
-   - Use pull requests for significant changes
-
-2. **Workflow**:
-   - Clone the repository using the instructions above
-   - Create feature branches for new development
-   - Push your changes to the repository: `git push origin master` or `git push origin your-feature-branch`
-
-3. **Code Contributions**:
-   - Focus on the sparse-checkout path for most work
-   - When adding global files (like .gitignore), temporarily disable sparse-checkout with `git sparse-checkout disable`
-   - Follow Julia style guidelines for code contributions
-   - Document your work in Jupyter notebooks
 
 ## Key Components/Models
 
