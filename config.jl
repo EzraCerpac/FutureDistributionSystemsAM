@@ -18,6 +18,7 @@ function get_project_paths(working_dir=nothing)
     paths = Dict(
         "ROOT_DIR" => root_dir,
         "BASE_DIR" => base_dir,
+        "SRC_DIR" => joinpath(root_dir, "src"),
         "TA_EXAMPLE_1D_DIR" => joinpath(root_dir, "ta_example_1d"),
         "TA_EXAMPLE_2D_DIR" => joinpath(root_dir, "ta_example_2d_distribution_transformer"),
         "REPORT_DIR" => joinpath(root_dir, "report")

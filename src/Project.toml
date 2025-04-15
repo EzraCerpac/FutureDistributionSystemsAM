@@ -1,0 +1,16 @@
+name = "MagnetostaticsFEM"
+uuid = "f8a2b3c4-d5e6-f7a8-b9c0-d1e2f3a4b5c6" # Replace with a generated UUID if needed
+# authors = ["Your Name <you@example.com>"] # Replace with actual author info
+version = "0.1.0"
+
+[deps]
+Gridap = "99c44334-8243-11e9-06df-dffb8f45c64a"
+GridapGmsh = "135f2a3c-8244-11e9-3319-a15a9cc5a80e"
+WriteVTK = "c7f01e9a-298f-50a4-8879-9a68d335b88b"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e" # Standard library
+
+[compat]
+julia = "1.10" # Or your target Julia version
+Gridap = "0.17" # Specify compatible versions
+GridapGmsh = "0.7"
+WriteVTK = "1.1"
