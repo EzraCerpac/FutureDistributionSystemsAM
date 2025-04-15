@@ -41,3 +41,22 @@ function define_current_density(material_tags::Dict{String, Int}, J_coil::Float6
     end
     return current_density
 end
+
+"""
+    define_conductivity(material_tags::Dict{String, Int}, σ_core::Float64)
+
+Returns a function `conductivity(tag)` that maps a material tag to its electrical conductivity.
+Assumes only the core is conductive.
+"""
+function define_conductivity(material_tags::Dict{String, Int}, σ_core::Float64)
+    
+    function conductivity(tag)
+        if tag == material_tags["Core"]
+            return σ_core
+        else
+            # Assume other materials are non-conductive
+            return 0.0 
+        end
+    end
+    return conductivity
+end
