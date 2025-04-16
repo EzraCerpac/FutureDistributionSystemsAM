@@ -34,3 +34,4 @@ function get_material_tags(labels)
         "Coil2" => tag_coil2
     )
 end
+

@@ -1,5 +1,6 @@
 using Gridap
 using Gridap.FESpaces
+using Gridap.MultiField
 include("problems.jl") 
 
 """
@@ -50,20 +51,14 @@ end
 Assembles and solves the Finite Element problem defined by the weak form.
 Handles both single-field and multi-field problems.
 """
-function solve_fem_problem(
-    problem::WeakFormProblem, 
-    U, 
-    V
-    )
-
+function solve_fem_problem(problem::WeakFormProblem, U, V)
     a = problem.a
     b = problem.b
 
     op = AffineFEOperator(a, b, U, V)
-
+    
     ls = LUSolver() 
     solver = LinearFESolver(ls)
-    solution = solve(solver, op) # Solution can be single or multi-field
-
+    solution = solve(solver, op)
     return solution
 end
