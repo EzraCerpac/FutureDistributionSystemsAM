@@ -12,6 +12,8 @@ include("problems.jl")
 include("fem_solver.jl")
 include("post_processing.jl")
 include("nonlinear_solver.jl")
+include("visualisation.jl")
+using .Visualisation
 
 # Export functions
 export load_mesh_and_tags, get_material_tags, get_tag_from_name
@@ -26,5 +28,6 @@ export setup_fe_spaces, solve_fem_problem
 export calculate_b_field, calculate_eddy_current, calculate_b_field_magnitude
 export save_results_vtk
 export solve_nonlinear_magnetodynamics
+export plot_line, magnetostatics_1d_plot
 
 end # module MagnetostaticsFEM
