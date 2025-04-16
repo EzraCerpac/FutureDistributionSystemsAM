@@ -62,3 +62,43 @@ function solve_fem_problem(problem::WeakFormProblem, U, V)
     solution = solve(solver, op)
     return solution
 end
+
+"""
+    extract_solution_values(solution)
+
+Extracts values from a FE solution and returns them as matrix/matrices.
+Handles both real and complex solutions.
+"""
+function extract_solution_values(solution)
+    if isa(solution, MultiFieldFEFunction)
+        # Complex solution case - extract real and imaginary parts
+        u_field = solution[1]  # Real part
+        v_field = solution[2]  # Imaginary part
+        
+        # Convert to cell arrays
+        u_cell = get_cell_dof_values(u_field)
+        v_cell = get_cell_dof_values(v_field)
+        
+        # Convert to matrices
+        u = convert_to_matrix(u_cell)
+        v = convert_to_matrix(v_cell)
+        
+        return u + 1im * v  # Combine real and imaginary parts
+    else
+        # Real-valued solution case
+        u_cell = get_cell_dof_values(solution)
+        u = convert_to_matrix(u_cell)
+        return u
+    end
+end
+
+"""
+    convert_to_matrix(cell_values)
+
+Helper function to convert cell values to a matrix format.
+"""
+function convert_to_matrix(cell_values)
+    # Flatten the cell array into a vector
+    values = vcat(collect.(cell_values)...)
+    return values
+end

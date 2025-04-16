@@ -5,8 +5,9 @@ using LinearAlgebra
     calculate_b_field_magnitude(uv, Ω)
 
 Helper function to calculate B-field magnitude from solution.
+Works with both MultiFieldFEFunction and Vector{ComplexF64} inputs.
 """
-function calculate_b_field_magnitude(uv, Ω)
+function calculate_b_field_magnitude(uv::MultiFieldFEFunction, Ω)
     # Get the real and imaginary parts of B from the multifield solution
     B_re, B_im = calculate_b_field(uv)
     
@@ -14,6 +15,26 @@ function calculate_b_field_magnitude(uv, Ω)
     function B_mag_sq(x)
         b_re = B_re(x)
         b_im = B_im(x)
+        return sqrt(inner(b_re, b_re) + inner(b_im, b_im))
+    end
+    
+    return B_mag_sq
+end
+
+"""
+    calculate_b_field_magnitude(uv::Vector{ComplexF64}, Ω)
+
+Vector{ComplexF64} version of the function to calculate B-field magnitude.
+Uses calculate_b_field for consistency.
+"""
+function calculate_b_field_magnitude(uv::Vector{ComplexF64}, Ω)
+    # Use calculate_b_field to get the B field components
+    B_re_approx, B_im_approx = calculate_b_field(uv)
+    
+    # Create function to calculate magnitude
+    function B_mag_sq(x)
+        b_re = B_re_approx(x)
+        b_im = B_im_approx(x)
         return sqrt(inner(b_re, b_re) + inner(b_im, b_im))
     end
     
@@ -44,9 +65,12 @@ function solve_nonlinear_magnetodynamics(
     
     # Initial material properties (linear)
     μr_initial = 1000.0  # Initial high permeability as starting point
-    reluctivity_func = define_reluctivity(material_tags, μ0, μr_initial)
+    reluctivity_func_initial = define_reluctivity(material_tags, μ0, μr_initial)
     conductivity_func = define_conductivity(material_tags, σ_core)
     source_current_func = define_current_density(material_tags, J0)
+    
+    # Store a reference to the initial reluctivity function
+    reluctivity_func = reluctivity_func_initial
     
     # Setup FE spaces
     U, V = setup_fe_spaces(model, order, field_type, dirichlet_tag, dirichlet_value)
@@ -65,17 +89,15 @@ function solve_nonlinear_magnetodynamics(
             Ω, dΩ, tags, reluctivity_func, conductivity_func, source_current_func, ω)
         
         # Solve the FEM problem
-        uv_current = solve_fem_problem(problem, U, V)
+        uv_FESpace = solve_fem_problem(problem, U, V)
+        uv_current = extract_solution_values(uv_FESpace)
         
         # Apply damping for better convergence
         if uv !== nothing
             # Store previous solution for error calculation
             uv_prev = uv
             
-            # Apply damping (this is trickier with Gridap objects)
-            # For now, we'll solve without damping as Gridap doesn't easily support
-            # arithmetic operations between FE functions
-            uv = uv_current
+            uv = uv_current * damping + (1 - damping) * uv_prev
         else
             # First iteration
             uv_prev = uv_current
@@ -85,21 +107,16 @@ function solve_nonlinear_magnetodynamics(
         # Calculate error (approximation using L2 norm)
         if iter > 0
             # Calculate L2 norm of difference (approximation)
-            u_prev = uv_prev[1]  # Real part
-            v_prev = uv_prev[2]  # Imaginary part
-            u_curr = uv[1]  # Real part
-            v_curr = uv[2]  # Imaginary part
-            
-            # Calculate error as integral of squared difference
-            error_u = sqrt(sum(∫((u_curr - u_prev)^2)dΩ))
-            error_v = sqrt(sum(∫((v_curr - v_prev)^2)dΩ))
-            error = sqrt(error_u^2 + error_v^2)
+            error = norm(uv - uv_prev)
         end
         
         # Update reluctivity function based on B-field solution
-        B_magnitude = calculate_b_field_magnitude(uv, Ω)
+        B_magnitude = calculate_b_field_magnitude(uv_FESpace, Ω)
         
         # Create a new function that updates reluctivity at each position
+        # Store reference to reluctivity_func_initial to avoid recursion
+        original_reluctivity = reluctivity_func_initial
+        
         function updated_reluctivity(tag)
             if tag == material_tags["Core"]
                 # Sample points in the core (simplified approach)
@@ -112,7 +129,8 @@ function solve_nonlinear_magnetodynamics(
                 μr = fmur_core(avg_B)
                 return 1.0 / (μ0 * μr)
             else
-                return reluctivity_func(tag)
+                # Use the original function instead of the current reluctivity_func
+                return original_reluctivity(tag)
             end
         end
         
@@ -129,5 +147,5 @@ function solve_nonlinear_magnetodynamics(
         println("Nonlinear solution converged in $iter iterations")
     end
     
-    return uv
+    return uv_FESpace
 end

@@ -27,6 +27,16 @@ function calculate_b_field(uv::MultiFieldFEFunction)
 end
 
 """
+    calculate_b_field(Az::Vector{ComplexF64}) -> (B_re_approx, B_im_approx)
+
+Approximates B-field components from a vector of complex Az values.
+"""
+function calculate_b_field(Az::Vector{ComplexF64})
+    # Raise not implemented error for now
+    error("calculate_b_field for Vector{ComplexF64} is not implemented yet.")
+end
+
+"""
     save_results_vtk(Ω, filenamebase, fields::Dict)
 
 Saves FE results to a VTK file. Handles potential MultiFieldFEFunction inputs by saving components.
