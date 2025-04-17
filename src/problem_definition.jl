@@ -134,3 +134,27 @@ function define_conductivity(material_tags::Dict{String, Int}, σ_core::Float64;
     end
     return conductivity
 end
+
+function define_heat_conductivity(
+    material_tags::Dict{String, Int},
+    k_core::Float64,
+    k_coil::Float64,
+    k_air::Float64;
+    core_tag_name="Core",
+    coil_tag_name="Coil",
+    air_tag_name="Air",
+)
+    function heat_conductivity(tag)
+        if haskey(material_tags, core_tag_name) && tag == material_tags[core_tag_name]
+            return k_core
+        elseif haskey(material_tags, air_tag_name) && tag == material_tags[air_tag_name]
+            return k_air
+        elseif occursin(coil_tag_name, string(tag))
+            return k_coil
+        else
+            # Default case - no conductivity
+            return 0.0 
+        end
+    end
+    return heat_conductivity
+end
