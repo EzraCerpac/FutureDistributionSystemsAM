@@ -123,7 +123,7 @@ Function to solve the nonlinear magnetodynamic problem using iterative substitut
 function solve_nonlinear_magnetodynamics(
     model, labels, tags, J0, μ0, bh_a, bh_b, bh_c, σ_core, ω, 
     order, field_type, dirichlet_tag, dirichlet_value;
-    max_iterations=50, tolerance=1e-6, damping=0.7)
+    max_iterations=50, tolerance=1e-10, damping=0.7)
     
     # Setup triangulation and measures
     Ω = Triangulation(model)
@@ -161,6 +161,8 @@ function solve_nonlinear_magnetodynamics(
     
     # Solve the FEM problem
     uv_FESpace = solve_fem_problem(problem, U, V)
+
+    # return uv_FESpace
     
     println("Starting nonlinear iterations")
     
@@ -188,20 +190,18 @@ function solve_nonlinear_magnetodynamics(
         end
         
         # Update reluctivity function based on B-field solution
-        if iter > 0
-            # Calculate reluctivity directly from the solution using the fixed function
-            fnu_values = calc_fnu(uv_FESpace, tags, material_tags, μ0, fmur_core)
-            
-            # Create updated reluctivity function using anonymous function assignment
-            reluctivity_func = tag -> begin
-                for (i, t) in enumerate(tags)
-                    if t == tag
-                        return fnu_values[i]
-                    end
+        # Calculate reluctivity directly from the solution using the fixed function
+        fnu_values = calc_fnu(uv_FESpace, tags, material_tags, μ0, fmur_core)
+        
+        # Create updated reluctivity function using anonymous function assignment
+        reluctivity_func = tag -> begin
+            for (i, t) in enumerate(tags)
+                if t == tag
+                    return fnu_values[i]
                 end
-                # Default return for tags not found
-                return 1.0 / μ0
             end
+            # Default return for tags not found
+            return 1.0 / μ0
         end
         
         # Define the weak form problem with current material properties
