@@ -35,3 +35,60 @@ function get_material_tags(labels)
     )
 end
 
+"""
+    get_material_tags_2d(labels)
+
+Extracts specific material tags for the 2D transformer model.
+Assumes Gmsh physical group names match the specified strings.
+"""
+function get_material_tags_2d(labels)
+    tags = Dict{String, Int}()
+    tag_names = [
+        "Oil", "Core",
+        "HV1l", "HV1r", "HV2l", "HV2r", "HV3l", "HV3r",
+        "LV1l", "LV1r", "LV2l", "LV2r", "LV3l", "LV3r",
+        "HV windings", "LV windings", "Enclosure"
+    ]
+    
+    # Note: "Enclosure" is a boundary tag (dim 1), others are surface tags (dim 2)
+    # We only fetch surface tags here for material properties.
+    # Boundary tags are handled separately (e.g., for Dirichlet conditions).
+    surface_tag_names = filter(name -> name != "Enclosure", tag_names)
+
+    for name in surface_tag_names
+        try
+            tags[name] = get_tag_from_name(labels, name)
+        catch e
+            println("Warning: Could not find tag '$name' in the mesh labels.")
+        end
+    end
+
+    # Add specific aliases if needed, e.g., for generic functions
+    if haskey(tags, "Oil")
+        tags["Air"] = tags["Oil"] # Treat Oil as Air for permeability/conductivity
+    end
+    # Add aliases for winding groups if needed by generic functions
+    if haskey(tags, "HV windings")
+        # Example: If a function expects "Coil1", "Coil2", etc.
+        # tags["Coil1"] = tags["HV windings"] 
+    end
+     if haskey(tags, "LV windings")
+        # tags["Coil2"] = tags["LV windings"]
+    end
+
+    # Add individual winding tags for source definition
+    winding_tags = filter(name -> occursin("HV", name) || occursin("LV", name), tag_names)
+    for name in winding_tags
+         if !haskey(tags, name) # Avoid overwriting if already added (e.g., "HV windings")
+            try
+                tags[name] = get_tag_from_name(labels, name)
+            catch e
+                 println("Warning: Could not find winding tag '$name' in the mesh labels.")
+            end
+         end
+    end
+
+
+    return tags
+end
+

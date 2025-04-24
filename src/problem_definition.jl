@@ -1,25 +1,34 @@
 using Gridap
 
 """
-    define_reluctivity(material_tags::Dict{String, Int}, μ0::Float64, μr_core::Float64)
+    define_reluctivity(material_tags::Dict{String, Int}, μ0::Float64, μr_core::Float64; 
+                          core_tag_name="Core", air_tag_name="Air")
 
 Returns a function `reluctivity(tag)` that maps a material tag to its magnetic reluctivity.
+Uses `air_tag_name` to identify the non-magnetic, non-conductive regions.
 """
 function define_reluctivity(material_tags::Dict{String, Int}, μ0::Float64, μr_core::Float64; 
-                          core_tag_name="Core")
+                          core_tag_name="Core", air_tag_name="Air")
     
+    # Get the actual tag IDs, handling cases where they might be missing
+    core_tag_id = get(material_tags, core_tag_name, -1) # Use -1 if tag not found
+    air_tag_id = get(material_tags, air_tag_name, -1)
+    
+    # Pre-calculate reluctivities
+    ν_core = 1.0 / (μ0 * μr_core)
+    ν_air = 1.0 / μ0
+
     function permeability(tag)
-        if haskey(material_tags, core_tag_name) && tag == material_tags[core_tag_name]
+        if tag == core_tag_id
             return μ0 * μr_core
-        elseif haskey(material_tags, "Air") && tag == material_tags["Air"] || 
-               haskey(material_tags, "Coil1") && tag == material_tags["Coil1"] || 
-               haskey(material_tags, "Coil2") && tag == material_tags["Coil2"] ||
-               haskey(material_tags, "HV winding phase 1 left") && tag == material_tags["HV winding phase 1 left"] ||
-               # Add other coil tags as needed
-               false
-            return μ0
+        elseif tag == air_tag_id
+             return μ0
+        # Check if the tag belongs to any winding (assuming names contain HV or LV)
+        # This requires the material_tags dict to contain all individual winding tags
+        elseif any(name -> occursin("HV", name) || occursin("LV", name), keys(filter(p -> p.second == tag, material_tags)))
+             return μ0 # Windings are typically in air/oil
         else
-            @warn "Permeability not defined for tag $(tag), returning μ0"
+            # Default to air/oil permeability if tag is unknown or not explicitly handled
             return μ0 
         end
     end
@@ -29,22 +38,32 @@ function define_reluctivity(material_tags::Dict{String, Int}, μ0::Float64, μr_
 end
 
 """
-    define_nonlinear_reluctivity(material_tags::Dict{String, Int}, bh_a::Float64, bh_b::Float64, bh_c::Float64, μ0::Float64)
+    define_nonlinear_reluctivity(material_tags::Dict{String, Int}, bh_a::Float64, bh_b::Float64, bh_c::Float64, μ0::Float64;
+                                     core_tag_name="Core", air_tag_name="Air")
 
 Returns a function `reluctivity(tag, B)` that maps a material tag and B-field magnitude to magnetic reluctivity.
 """
-function define_nonlinear_reluctivity(material_tags::Dict{String, Int}, bh_a::Float64, bh_b::Float64, bh_c::Float64, μ0::Float64)
+function define_nonlinear_reluctivity(material_tags::Dict{String, Int}, bh_a::Float64, bh_b::Float64, bh_c::Float64, μ0::Float64;
+                                     core_tag_name="Core", air_tag_name="Air")
+    
+    core_tag_id = get(material_tags, core_tag_name, -1)
+    air_tag_id = get(material_tags, air_tag_name, -1)
+    ν_air = 1.0 / μ0
+
     function reluctivity(tag, B)
-        if haskey(material_tags, "Core") && tag == material_tags["Core"]
-            μr = 1.0 / (bh_a + (1 - bh_a) * B^(2*bh_b) / (B^(2*bh_b) + bh_c))
+        if tag == core_tag_id
+            # Avoid division by zero or NaN if B is very small
+            B_eff = max(B, 1e-9) 
+            μr = 1.0 / (bh_a + (1 - bh_a) * B_eff^(2*bh_b) / (B_eff^(2*bh_b) + bh_c))
             return 1.0 / (μ0 * μr)
-        elseif haskey(material_tags, "Air") && tag == material_tags["Air"] || 
-               haskey(material_tags, "Coil1") && tag == material_tags["Coil1"] || 
-               haskey(material_tags, "Coil2") && tag == material_tags["Coil2"]
-            return 1.0 / μ0
+        elseif tag == air_tag_id
+            return ν_air
+        # Check windings
+        elseif any(name -> occursin("HV", name) || occursin("LV", name), keys(filter(p -> p.second == tag, material_tags)))
+             return ν_air
         else
-            @warn "Reluctivity not defined for tag $(tag), returning air reluctivity"
-            return 1.0 / μ0
+            # Default to air reluctivity
+            return ν_air
         end
     end
     
@@ -117,20 +136,47 @@ function define_current_density(material_tags::Dict{String, Int}, J_coil::Float6
 end
 
 """
-    define_conductivity(material_tags::Dict{String, Int}, σ_core::Float64; core_tag_name="Core")
+    define_conductivity(material_tags::Dict{String, Int}, σ_core::Float64; core_tag_name="Core", air_tag_name="Air")
 
 Returns a function `conductivity(tag)` that maps a material tag to its electrical conductivity.
-Assumes only the core is conductive.
+Assumes only the core is conductive. Uses `air_tag_name` for consistency.
 """
-function define_conductivity(material_tags::Dict{String, Int}, σ_core::Float64; core_tag_name="Core")
+function define_conductivity(material_tags::Dict{String, Int}, σ_core::Float64; core_tag_name="Core", air_tag_name="Air")
     
+    core_tag_id = get(material_tags, core_tag_name, -1)
+    air_tag_id = get(material_tags, air_tag_name, -1) # Get air tag ID
+
     function conductivity(tag)
-        if haskey(material_tags, core_tag_name) && tag == material_tags[core_tag_name]
+        if tag == core_tag_id
             return σ_core
         else
-            # Assume other materials are non-conductive
+            # Assume other materials (air, oil, windings) are non-conductive
             return 0.0 
         end
     end
     return conductivity
+end
+
+function define_heat_conductivity(
+    material_tags::Dict{String, Int},
+    k_core::Float64,
+    k_coil::Float64,
+    k_air::Float64;
+    core_tag_name="Core",
+    coil_tag_name="Coil",
+    air_tag_name="Air",
+)
+    function heat_conductivity(tag)
+        if haskey(material_tags, core_tag_name) && tag == material_tags[core_tag_name]
+            return k_core
+        elseif haskey(material_tags, air_tag_name) && tag == material_tags[air_tag_name]
+            return k_air
+        elseif occursin(coil_tag_name, string(tag))
+            return k_coil
+        else
+            # Default case - no conductivity
+            return 0.0 
+        end
+    end
+    return heat_conductivity
 end
