@@ -121,6 +121,7 @@ end
 Function to solve the nonlinear magnetodynamic problem using iterative substitution.
 """
 function solve_nonlinear_magnetodynamics(
+    # TODO: split this function into multiple smaller functions
     model, labels, tags, J0, μ0, bh_a, bh_b, bh_c, σ_core, ω, 
     order, field_type, dirichlet_tag, dirichlet_value;
     max_iterations=50, tolerance=1e-10, damping=0.7)
@@ -156,7 +157,7 @@ function solve_nonlinear_magnetodynamics(
     uv = nothing
 
     # Define the weak form problem with current material properties
-    problem = magnetodynamics_1d_harmonic_coupled_weak_form(
+    problem = magnetodynamics_harmonic_coupled_weak_form(
         Ω, dΩ, tags, reluctivity_func, conductivity_func, source_current_func, ω)
     
     # Solve the FEM problem
@@ -168,8 +169,6 @@ function solve_nonlinear_magnetodynamics(
     
     while iter < max_iterations && error > tolerance
         uv_current = extract_solution_values(uv_FESpace)
-        println(uv_FESpace)
-        println(uv_current)
         
         # Apply damping for better convergence
         if uv !== nothing
@@ -205,7 +204,7 @@ function solve_nonlinear_magnetodynamics(
         end
         
         # Define the weak form problem with current material properties
-        problem = magnetodynamics_1d_harmonic_coupled_weak_form(
+        problem = magnetodynamics_harmonic_coupled_weak_form(
             Ω, dΩ, tags, reluctivity_func, conductivity_func, source_current_func, ω)
         
         # Solve the FEM problem

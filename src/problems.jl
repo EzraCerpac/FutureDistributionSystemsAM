@@ -12,11 +12,11 @@ struct WeakFormProblem
 end
 
 """
-    magnetostatics_1d_weak_form(Ω, dΩ, tags, reluctivity_func, current_density_func)
+    magnetostatics_weak_form(Ω, dΩ, tags, reluctivity_func, current_density_func)
 
-Creates the weak form for 1D magnetostatics.
+Creates the weak form for magnetostatics.
 """
-function magnetostatics_1d_weak_form(
+function magnetostatics_weak_form(
     Ω::Triangulation, 
     dΩ::Measure, 
     tags::AbstractArray, 
@@ -33,11 +33,11 @@ function magnetostatics_1d_weak_form(
 end
 
 """
-    magnetodynamics_1d_harmonic_weak_form(Ω, dΩ, tags, reluctivity_func, conductivity_func, current_density_func, omega)
+    magnetodynamics_harmonic_weak_form(Ω, dΩ, tags, reluctivity_func, conductivity_func, current_density_func, omega)
 
-Creates the weak form for 1D time-harmonic magnetodynamics.
+Creates the weak form for time-harmonic magnetodynamics.
 """
-function magnetodynamics_1d_harmonic_weak_form(
+function magnetodynamics_harmonic_weak_form(
     Ω::Triangulation, 
     dΩ::Measure, 
     tags::AbstractArray, 
@@ -60,11 +60,11 @@ function magnetodynamics_1d_harmonic_weak_form(
 end
 
 """
-    magnetodynamics_1d_harmonic_coupled_weak_form(Ω, dΩ, tags, reluctivity_func, conductivity_func, source_current_func, ω)
+    magnetodynamics_harmonic_coupled_weak_form(Ω, dΩ, tags, reluctivity_func, conductivity_func, source_current_func, ω)
 
-Creates the weak form for 1D time-harmonic magnetodynamics using coupled real/imaginary parts.
+Creates the weak form for time-harmonic magnetodynamics using coupled real/imaginary parts.
 """
-function magnetodynamics_1d_harmonic_coupled_weak_form(
+function magnetodynamics_harmonic_coupled_weak_form(
     Ω::Triangulation, 
     dΩ::Measure, 
     tags::AbstractArray, 
@@ -91,39 +91,3 @@ function magnetodynamics_1d_harmonic_coupled_weak_form(
 
     return WeakFormProblem(a, b)
 end
-
-"""
-    magnetodynamics_2d_harmonic_coupled_weak_form(Ω, dΩ, tags, reluctivity_func, conductivity_func, source_current_func, ω)
-
-Creates the weak form for 2D time-harmonic magnetodynamics using coupled real/imaginary parts.
-"""
-function magnetodynamics_2d_harmonic_coupled_weak_form(
-    Ω::Triangulation,
-    dΩ::Measure,
-    tags::AbstractArray,
-    reluctivity_func,
-    conductivity_func,
-    source_current_func,
-    ω::Float64
-    )
-
-    τ = CellField(tags, Ω)
-    ν = reluctivity_func ∘ τ
-    σ = conductivity_func ∘ τ
-    J0 = source_current_func ∘ τ
-
-    # Define the individual terms for the coupled system
-    a11(u,ϕ) = ∫( ν*∇(u)⋅∇(ϕ) )dΩ
-    a12(v,ϕ) = ∫( -ω*σ*v*ϕ )dΩ
-    a21(u,ψ) = ∫( ω*σ*u*ψ )dΩ
-    a22(v,ψ) = ∫( ν*∇(v)⋅∇(ψ) )dΩ
-
-    b1(ϕ) = ∫( J0*ϕ )dΩ
-    b2(ψ) = ∫( 0*ψ )dΩ
-
-    terms = [a11, a12, a21, a22]
-    lterms = [b1, b2]
-
-    return WeakFormProblem(terms, lterms)
-end
-

@@ -15,15 +15,14 @@ include("post_processing.jl")
 include("nonlinear_solver.jl")
 
 # Export functions
-export load_mesh_and_tags, get_material_tags, get_tag_from_name
+export load_mesh_and_tags, get_material_tags, get_material_tags_2d, get_tag_from_name
 export define_reluctivity, define_conductivity, define_current_density
 export define_heat_conductivity
 export define_nonlinear_reluctivity, update_reluctivity_from_field
 export WeakFormProblem
-export magnetostatics_1d_weak_form
-export magnetodynamics_1d_harmonic_weak_form
-export magnetodynamics_1d_harmonic_coupled_weak_form
-export magnetodynamics_2d_harmonic_coupled_weak_form
+export magnetostatics_weak_form
+export magnetodynamics_harmonic_weak_form
+export magnetodynamics_harmonic_coupled_weak_form
 export solve_1d_steady_heat_weak_form
 export get_Q
 export setup_fe_spaces, solve_fem_problem
