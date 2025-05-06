@@ -37,13 +37,27 @@ function solve_heatdynamics(
     Ω = Triangulation(model)
     dΩ = Measure(Ω, 2*order)
 
-    # Use loss_func directly as the heat source term
-    Q = loss_func
+    # Setup heat source from loss function
+    function heat_source(tag)
+        return max(0.0, loss_func(tag))  # Ensure non-negative heat source
+    end
 
-    U, V = setup_fe_spaces(Ω, order, Float64, dirichlet_tag, dirichlet_value)
+    # Setup FE spaces with ambient temperature as reference
+    U = FESpace(model, ReferenceFE(lagrangian, Float64, order), 
+                conformity=:H1, dirichlet_tags=[dirichlet_tag])
+    
+    # Set Dirichlet BC to ambient temperature
+    U0 = TrialFESpace(U, dirichlet_value)
 
-    problem = heat_problem_weak_form(Ω, dΩ, tags, conductivity_func, Q)
+    # Solve the heat problem
+    problem = heat_problem_weak_form(Ω, dΩ, tags, conductivity_func, heat_source)
+    
+    # Solve with temperature offset from ambient
+    θ = solve_fem_problem(problem, U0, U)
 
-    uv_FESpace = solve_fem_problem(problem, U, V)
-    return uv_FESpace
+    # The solution θ represents temperature rise above ambient
+    # Add ambient temperature back to get actual temperature
+    T = θ
+
+    return T
 end
