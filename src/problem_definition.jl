@@ -11,17 +11,13 @@ function define_reluctivity(material_tags::Dict{String, Int}, μ0::Float64, μr_
                           core_tag_name="Core", air_tag_name="Air")
     
     # Get the actual tag IDs, handling cases where they might be missing
-    core_tag_id = get(material_tags, core_tag_name, -1) # Use -1 if tag not found
+    core_tag_id = get(material_tags, core_tag_name, -1)
     air_tag_id = get(material_tags, air_tag_name, -1)
-    
-    # Pre-calculate reluctivities
-    ν_core = 1.0 / (μ0 * μr_core)
-    ν_air = 1.0 / μ0
 
     function permeability(tag)
-        if tag == core_tag_id
+        if haskey(material_tags, core_tag_name) && tag == material_tags[core_tag_name]
             return μ0 * μr_core
-        elseif tag == air_tag_id
+        elseif haskey(material_tags, air_tag_name) && tag == material_tags[air_tag_name]
              return μ0
         # Check if the tag belongs to any winding (assuming names contain HV or LV)
         # This requires the material_tags dict to contain all individual winding tags
