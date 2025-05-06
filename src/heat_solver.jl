@@ -32,15 +32,10 @@ end
 
 function solve_heatdynamics(
     model, tags, order, dirichlet_tag, dirichlet_value, 
-    loss_func, conductivity_func)
+    heat_source, conductivity_func)
 
     Ω = Triangulation(model)
     dΩ = Measure(Ω, 2*order)
-
-    # Setup heat source from loss function
-    function heat_source(tag)
-        return max(0.0, loss_func(tag))  # Ensure non-negative heat source
-    end
 
     # Setup FE spaces with ambient temperature as reference
     U = FESpace(model, ReferenceFE(lagrangian, Float64, order), 

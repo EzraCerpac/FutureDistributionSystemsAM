@@ -96,15 +96,18 @@ function heat_problem_weak_form(
     Ω::Triangulation, 
     dΩ::Measure, 
     tags::AbstractArray, 
-    diffusivity_func, 
-    source_func
+    diffusivity_func::Function, 
+    source_func::CellField
     )
     
+    # Create a cell field from the material tags
     τ = CellField(tags, Ω)
-    k = diffusivity_func ∘ τ  # Thermal conductivity
-    Q = source_func ∘ τ      # Heat source (loss density)
+    # Map the diffusivity function over the cell field to obtain a per-cell thermal conductivity k
+    k = diffusivity_func ∘ τ  
+    # Q is the heat source (loss density), already defined as a CellField
+    Q = source_func      
 
-    # Modified weak form to ensure non-negative temperature difference
+    # Define the bilinear and linear forms for the steady-state heat equation:
     a(u,v) = ∫( k * ∇(u) ⋅ ∇(v) )dΩ
     b(v)   = ∫( Q * v )dΩ
 
