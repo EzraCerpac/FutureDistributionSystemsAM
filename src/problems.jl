@@ -91,3 +91,22 @@ function magnetodynamics_harmonic_coupled_weak_form(
 
     return WeakFormProblem(a, b)
 end
+
+function heat_problem_weak_form(
+    Ω::Triangulation, 
+    dΩ::Measure, 
+    tags::AbstractArray, 
+    diffusivity_func, 
+    source_func
+    )
+    
+    τ = CellField(tags, Ω) # Cell field for material tags
+
+    # Bilinear form: -∫(k ∇u ⋅ ∇v)dΩ
+    a(u,v) = ∫( (diffusivity_func ∘ τ) * ∇(u) ⋅ ∇(v) )dΩ
+    
+    # Linear form: ∫(f v)dΩ
+    b(v)   = ∫( (source_func ∘ τ) * v )dΩ
+
+    return WeakFormProblem(a, b)
+end
