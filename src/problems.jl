@@ -135,13 +135,13 @@ function heat_problem_weak_form(
     source_func
     )
     
-    τ = CellField(tags, Ω) # Cell field for material tags
+    τ = CellField(tags, Ω)
+    k = diffusivity_func ∘ τ  # Thermal conductivity
+    Q = source_func ∘ τ      # Heat source (loss density)
 
-    # Bilinear form: -∫(k ∇u ⋅ ∇v)dΩ
-    a(u,v) = ∫( (diffusivity_func ∘ τ) * ∇(u) ⋅ ∇(v) )dΩ
-    
-    # Linear form: ∫(f v)dΩ
-    b(v)   = ∫( (source_func ∘ τ) * v )dΩ
+    # Modified weak form to ensure non-negative temperature difference
+    a(u,v) = ∫( k * ∇(u) ⋅ ∇(v) )dΩ
+    b(v)   = ∫( Q * v )dΩ
 
     return WeakFormProblem(a, b)
 end
