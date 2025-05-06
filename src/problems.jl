@@ -60,6 +60,41 @@ function magnetodynamics_harmonic_weak_form(
 end
 
 """
+    magnetodynamics_harmonic_coupled_weak_form(Ω, dΩ, tags, reluctivity_cellfield, conductivity_func, source_current_func, ω)
+
+Creates the weak form for time-harmonic magnetodynamics using coupled real/imaginary parts.
+`reluctivity_cellfield` is a CellField representing reluctivity for each cell.
+`conductivity_func` and `source_current_func` are functions of material tags.
+"""
+function magnetodynamics_harmonic_coupled_weak_form(
+    Ω::Triangulation, 
+    dΩ::Measure, 
+    tags::AbstractArray, 
+    reluctivity_cellfield::CellField,
+    conductivity_func::Function,
+    source_current_func::Function,
+    ω::Float64
+    )
+
+    τ = CellField(tags, Ω) # Cell field for material tags (used for conductivity and source)
+    ν = reluctivity_cellfield   # Use CellField directly
+    σ = conductivity_func ∘ τ
+    J_r = source_current_func ∘ τ # Real source current
+
+    # Bilinear form for the coupled system (u, v) tested with (ϕ₁, ϕ₂)
+    # a((u,v), (ϕ₁,ϕ₂)) = ∫(ν∇u⋅∇ϕ₁)dΩ + ∫(ωσv ϕ₁)dΩ  (Eq 1)
+    #                  + ∫(ν∇v⋅∇ϕ₂)dΩ - ∫(ωσu ϕ₂)dΩ  (Eq 2)
+    a((u,v), (ϕ₁,ϕ₂)) = ∫( ν*∇(u)⋅∇(ϕ₁) + (ω*σ)*v*ϕ₁ +  # Eq 1 terms
+                           ν*∇(v)⋅∇(ϕ₂) - (ω*σ)*u*ϕ₂ )dΩ  # Eq 2 terms
+             
+    # Linear form for the coupled system (u, v) tested with (ϕ₁, ϕ₂)
+    # b((ϕ₁,ϕ₂)) = ∫(J_r ϕ₁)dΩ (from Eq 1)
+    b((ϕ₁,ϕ₂)) = ∫( J_r * ϕ₁ )dΩ
+
+    return WeakFormProblem(a, b)
+end
+
+"""
     magnetodynamics_harmonic_coupled_weak_form(Ω, dΩ, tags, reluctivity_func, conductivity_func, source_current_func, ω)
 
 Creates the weak form for time-harmonic magnetodynamics using coupled real/imaginary parts.
@@ -68,9 +103,9 @@ function magnetodynamics_harmonic_coupled_weak_form(
     Ω::Triangulation, 
     dΩ::Measure, 
     tags::AbstractArray, 
-    reluctivity_func, 
-    conductivity_func, 
-    source_current_func, 
+    reluctivity_func::Function,
+    conductivity_func::Function, 
+    source_current_func::Function,
     ω::Float64
     )
 

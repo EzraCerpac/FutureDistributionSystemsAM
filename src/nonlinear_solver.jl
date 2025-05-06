@@ -1,4 +1,5 @@
 using Gridap
+using Gridap.Geometry
 using LinearAlgebra
 
 """
@@ -42,42 +43,58 @@ function calculate_b_field_magnitude(uv::Vector{ComplexF64}, Ω)
 end
 
 """
-    calc_fnu(uv::MultiFieldFEFunction, tags, material_tags, μ0, fmur_core)
+    calc_fnu(uv_fe::MultiFieldFEFunction, Ω::Triangulation, integration_degree::Int, tags::AbstractArray, material_tags::Dict, μ0::Float64, fmur_core::Function)
 
 Calculates the reluctivity based on B-field with an efficient approach.
-Inspired by the notebook implementation but adapted for Gridap's FE functions.
+Each cell gets its own reluctivity based on the average B-field in that cell.
+Uses an explicit integration_degree to define quadrature points for averaging.
 """
-function calc_fnu(uv::MultiFieldFEFunction, tags, material_tags, μ0, fmur_core)
-    # Get the real and imaginary parts of B from the multifield solution
-    B_re, B_im = calculate_b_field(uv)
+function calc_fnu(uv_fe::MultiFieldFEFunction, Ω::Triangulation, integration_degree::Int, tags::AbstractArray, material_tags::Dict, μ0::Float64, fmur_core::Function)
+    B_re, B_im = calculate_b_field(uv_fe)
     
-    # Create a function to calculate B magnitude at each point
-    function B_mag(x)
-        b_re = B_re(x)
-        b_im = B_im(x)
-        return sqrt(inner(b_re, b_re) + inner(b_im, b_im))
+    function B_mag_pointwise(x)
+        b_re_val = B_re(x)
+        b_im_val = B_im(x)
+        return sqrt(inner(b_re_val, b_re_val) + inner(b_im_val, b_im_val))
     end
+
+    fnu_values = zeros(Float64, length(tags))
     
-    # Map the elements to reluctivity based on their material tag
-    function reluctivity_at_tag(tag)
+    # Construct CellQuadrature explicitly using the triangulation and integration_degree
+    cell_quad = CellQuadrature(Ω, integration_degree)
+    # Get CellPoint object from CellQuadrature
+    cell_point_obj = get_cell_points(cell_quad)
+    # Get the array of physical quadrature points from CellPoint
+    # phys_quad_points is an array of arrays: phys_quad_points[cell_id][point_id_in_cell]
+    phys_quad_points = get_array(cell_point_obj)
+
+    grid = get_grid(Ω) # Get the underlying grid from the triangulation
+    cell_maps = get_cell_map(grid)
+    reffes = get_reffes(grid)
+    cell_types = get_cell_type(grid)
+
+    for cell_id in 1:num_cells(Ω)
+        tag = tags[cell_id]
         if tag == material_tags["Core"]
-            # For core material, we need to sample B at multiple points and average
-            # For 1D case, we can use simple averaging
-            sample_points = [VectorValue(x) for x in range(-0.03, 0.03, length=30)]
-            B_samples = [B_mag(x) for x in sample_points]
-            avg_B = sum(B_samples) / length(B_samples)
+            points_in_cell = phys_quad_points[cell_id]
+            if isempty(points_in_cell)
+                cell_map = cell_maps[cell_id]
+                reffe = reffes[cell_types[cell_id]]
+                ref_polytope = get_polytope(reffe)
+                ref_centroid = get_centroid(ref_polytope)
+                phys_centroid = evaluate(cell_map, ref_centroid)
+                avg_B = B_mag_pointwise(phys_centroid)
+            else
+                B_samples_at_quad_points = [B_mag_pointwise(p) for p in points_in_cell]
+                avg_B = sum(B_samples_at_quad_points) / length(B_samples_at_quad_points)
+            end
             
-            # Calculate μr using the BH curve
             μr = fmur_core(avg_B)
-            return 1.0 / (μ0 * μr)
+            fnu_values[cell_id] = 1.0 / (μ0 * μr)
         else
-            # Non-core materials have μr = 1
-            return 1.0 / μ0
+            fnu_values[cell_id] = 1.0 / μ0 
         end
     end
-    
-    # Create array of reluctivity values for each element
-    fnu_values = [reluctivity_at_tag(tag) for tag in tags]
     
     return fnu_values
 end
@@ -121,14 +138,14 @@ end
 Function to solve the nonlinear magnetodynamic problem using iterative substitution.
 """
 function solve_nonlinear_magnetodynamics(
-    # TODO: split this function into multiple smaller functions
     model, labels, tags, J0, μ0, bh_a, bh_b, bh_c, σ_core, ω, 
     order, field_type, dirichlet_tag, dirichlet_value;
     max_iterations=50, tolerance=1e-10, damping=0.7)
     
     # Setup triangulation and measures
     Ω = Triangulation(model)
-    dΩ = Measure(Ω, 2*order)
+    integration_degree = 2 * order
+    dΩ = Measure(Ω, integration_degree)
     
     # Get material tags dictionary
     material_tags = get_material_tags(labels)
@@ -141,11 +158,13 @@ function solve_nonlinear_magnetodynamics(
     # Initial material properties (linear)
     μr_initial = 1000.0  # Initial high permeability as starting point
     reluctivity_func_initial = define_reluctivity(material_tags, μ0, μr_initial)
+    
+    # Convert initial reluctivity function to a CellField based on cell tags
+    initial_reluctivity_values = [reluctivity_func_initial(t) for t in tags]
+    current_reluctivity_param = CellField(initial_reluctivity_values, Ω)
+
     conductivity_func = define_conductivity(material_tags, σ_core)
     source_current_func = define_current_density(material_tags, J0)
-    
-    # Store a reference to the initial reluctivity function
-    reluctivity_func = reluctivity_func_initial
     
     # Setup FE spaces
     U, V = setup_fe_spaces(model, order, field_type, dirichlet_tag, dirichlet_value)
@@ -158,56 +177,37 @@ function solve_nonlinear_magnetodynamics(
 
     # Define the weak form problem with current material properties
     problem = magnetodynamics_harmonic_coupled_weak_form(
-        Ω, dΩ, tags, reluctivity_func, conductivity_func, source_current_func, ω)
+        Ω, dΩ, tags, current_reluctivity_param, conductivity_func, source_current_func, ω)
     
     # Solve the FEM problem
     uv_FESpace = solve_fem_problem(problem, U, V)
 
-    # return uv_FESpace
-    
     println("Starting nonlinear iterations")
     
     while iter < max_iterations && error > tolerance
-        uv_current = extract_solution_values(uv_FESpace)
+        uv_current_sol = uv_FESpace
         
-        # Apply damping for better convergence
+        uv_current_dofs = extract_solution_values(uv_current_sol)
+
         if uv !== nothing
-            # Store previous solution for error calculation
             uv_prev = uv
-            
-            uv = uv_current * damping + (1 - damping) * uv_prev
+            uv = uv_current_dofs * damping + (1 - damping) * uv_prev
         else
-            # First iteration
-            uv_prev = uv_current
-            uv = uv_current
+            uv_prev = uv_current_dofs 
+            uv = uv_current_dofs
         end
         
-        # Calculate error (approximation using L2 norm)
         if iter > 0
-            # Calculate L2 norm of difference (approximation)
-            error = norm(uv - uv_prev)
+            error = norm(uv - uv_prev) / norm(uv_prev)
         end
         
-        # Update reluctivity function based on B-field solution
-        # Calculate reluctivity directly from the solution using the fixed function
-        fnu_values = calc_fnu(uv_FESpace, tags, material_tags, μ0, fmur_core)
+        # Pass integration_degree instead of dΩ to calc_fnu
+        fnu_values = calc_fnu(uv_FESpace, Ω, integration_degree, tags, material_tags, μ0, fmur_core)
+        current_reluctivity_param = CellField(fnu_values, Ω)
         
-        # Create updated reluctivity function using anonymous function assignment
-        reluctivity_func = tag -> begin
-            for (i, t) in enumerate(tags)
-                if t == tag
-                    return fnu_values[i]
-                end
-            end
-            # Default return for tags not found
-            return 1.0 / μ0
-        end
-        
-        # Define the weak form problem with current material properties
         problem = magnetodynamics_harmonic_coupled_weak_form(
-            Ω, dΩ, tags, reluctivity_func, conductivity_func, source_current_func, ω)
+            Ω, dΩ, tags, current_reluctivity_param, conductivity_func, source_current_func, ω)
         
-        # Solve the FEM problem
         uv_FESpace = solve_fem_problem(problem, U, V)
 
         iter += 1
