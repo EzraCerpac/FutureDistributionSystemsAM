@@ -131,13 +131,15 @@ function heat_problem_weak_form(
     Ω::Triangulation, 
     dΩ::Measure, 
     tags::AbstractArray, 
-    diffusivity_func, 
-    source_func
+    diffusivity_func::Function, 
+    heat_source::Function
     )
     
     τ = CellField(tags, Ω)
-    k = diffusivity_func ∘ τ  # Thermal conductivity
-    Q = source_func ∘ τ      # Heat source (loss density)
+    k = diffusivity_func ∘ τ  # Thermal conductivity, which must be defined on the mesh using tags
+    
+    # The heat source cannot be defined using tags, as it is a function of the mesh coordinates.
+    Q = heat_source          # Heat source (loss density)
 
     # Modified weak form to ensure non-negative temperature difference
     a(u,v) = ∫( k * ∇(u) ⋅ ∇(v) )dΩ
