@@ -11,7 +11,7 @@ using Gridap.Geometry: get_triangulation
 using Printf
 using LaTeXStrings
 
-export plot_contour_2d, create_field_animation
+export plot_contour_2d, create_field_animation, save_transient_pvd, plot_time_signal, plot_fft_spectrum
 
 """
     plot_contour_2d(Ω, field_to_plot; title="Contour Plot", nlevels=20, output_path=nothing, size=(600,600))
@@ -216,6 +216,86 @@ function create_field_animation(
         
         return gif(anim, gif_path, fps=fps)
     end
+end
+
+"""
+    save_transient_pvd(Ω_static::Triangulation, uh_solution_iterable, pvd_filename_base::String; uh0::Union{FEFunction, Nothing}=nothing)
+
+Saves transient simulation results to a PVD file collection.
+Iterates through the `uh_solution_iterable` (typically from `solve(odesolver, ...)`).
+`uh0` is the optional initial condition FEFunction to save as time step 0.
+"""
+function save_transient_pvd(Ω_static::Triangulation, uh_solution_iterable, pvd_filename_base::String; uh0::Union{FEFunction, Nothing}=nothing)
+    output_dir = dirname(pvd_filename_base)
+    if output_dir != "" && !isdir(output_dir)
+        mkpath(output_dir)
+    end
+    base_name_no_ext = first(splitext(pvd_filename_base))
+
+    println("Saving transient results to PVD collection: $(base_name_no_ext).pvd")
+    
+    # Ensure createpvd and createvtk are available from Gridap.Visualization
+    # using Gridap.Visualization: createpvd, createvtk (already at top of module)
+
+    createpvd(base_name_no_ext) do pvd
+        if uh0 !== nothing
+            # Save initial condition as time step 0
+            # Ensure the filename for createvtk does not have .pvd extension
+            vtk_file_t0 = joinpath(output_dir, "$(first(splitext(basename(base_name_no_ext))))_t0")
+            pvd[0.0] = createvtk(Ω_static, vtk_file_t0, cellfields=Dict("Az" => uh0))
+            println("Saved initial condition to $(vtk_file_t0).vtu")
+        end
+        
+        for (i, (uh_n, t_n)) in enumerate(uh_solution_iterable)
+            # Ensure the filename for createvtk does not have .pvd extension
+            vtk_file_tn = joinpath(output_dir, "$(first(splitext(basename(base_name_no_ext))))_t$(@sprintf("%.4f", t_n))")
+            # Replace dots in t_n for filename compatibility if necessary, but createvtk handles this.
+            pvd[t_n] = createvtk(Ω_static, vtk_file_tn, cellfields=Dict("Az" => uh_n))
+            println("Saved frame for t=$(@sprintf("%.4f", t_n)) to $(vtk_file_tn).vtu")
+        end
+    end
+    println("PVD collection saved.")
+end
+
+"""
+    plot_time_signal(time_vector::AbstractVector, signal_vector::AbstractVector; 
+                     title_str::String="Time Signal", xlabel_str::String="Time [s]", ylabel_str::String="Amplitude", 
+                     output_path::Union{String,Nothing}=nothing)
+
+Plots a 1D time signal.
+"""
+function plot_time_signal(time_vector::AbstractVector, signal_vector::AbstractVector; 
+                          title_str::String="Time Signal", xlabel_str::String="Time [s]", ylabel_str::String="Amplitude", 
+                          output_path::Union{String,Nothing}=nothing)
+    plt = plot(time_vector, signal_vector, title=title_str, xlabel=xlabel_str, ylabel=ylabel_str, legend=false)
+    if output_path !== nothing
+        savefig(plt, output_path)
+        println("Time signal plot saved to: $output_path")
+    end
+    display(plt)
+    return plt
+end
+
+"""
+    plot_fft_spectrum(frequencies::AbstractVector, magnitudes::AbstractVector; 
+                        title_str::String="FFT Spectrum", xlabel_str::String="Frequency [Hz]", ylabel_str::String="Magnitude", 
+                        xlims_val=nothing, output_path::Union{String,Nothing}=nothing)
+
+Plots an FFT spectrum.
+"""
+function plot_fft_spectrum(frequencies::AbstractVector, magnitudes::AbstractVector; 
+                           title_str::String="FFT Spectrum", xlabel_str::String="Frequency [Hz]", ylabel_str::String="Magnitude", 
+                           xlims_val=nothing, output_path::Union{String,Nothing}=nothing)
+    plt = plot(frequencies, magnitudes, title=title_str, xlabel=xlabel_str, ylabel=ylabel_str, legend=false, seriestype=:stem)
+    if xlims_val !== nothing
+        xlims!(plt, xlims_val)
+    end
+    if output_path !== nothing
+        savefig(plt, output_path)
+        println("FFT spectrum plot saved to: $output_path")
+    end
+    display(plt)
+    return plt
 end
 
 end # module Visualisation
