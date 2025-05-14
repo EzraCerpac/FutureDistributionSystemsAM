@@ -27,17 +27,16 @@ freq = 50    # Frequency [Hz]
 ω = 2 * pi * freq # Angular frequency [rad/s]
 
 # FEM Parameters
-order = 3
+order = 2
 field_type = ComplexF64 # Still use ComplexF64 marker for setup_fe_spaces
 dirichlet_tag = "D"
 dirichlet_value = 0.0 + 0.0im # Dirichlet BC for A = u + iv
 
 # Paths
 mesh_file = joinpath(paths["GEO_DIR"], "coil_geo.msh")
-output_file_base = joinpath(paths["OUTPUT_DIR"], "magnetodynamics_harmonic_coupled")
+output_file_base = joinpath(OUT_DIR, "magnetodynamics_harmonic_coupled")
 
 println("Mesh file: ", mesh_file)
-println("Output directory: ", paths["OUTPUT_DIR"])
 
 # %% [markdown]
 # ## Setup FEM Problem
@@ -120,15 +119,14 @@ println("Mass Matrix M: size $(size(M_matrix)), non-zeros $(nnz(M_matrix))")
 println("Load Vector f_re: length $(length(f_re_vector))")
 
 # Save matrices and vector
-output_dir = paths["OUTPUT_DIR"]
-MagnetostaticsFEM.save_data_serialized(joinpath(output_dir, "S_matrix.dat"), S_matrix)
-MagnetostaticsFEM.save_data_serialized(joinpath(output_dir, "M_matrix.dat"), M_matrix)
-MagnetostaticsFEM.save_data_serialized(joinpath(output_dir, "f_re_vector.dat"), f_re_vector)
+MagnetostaticsFEM.save_data_serialized(joinpath(MATRICES_DIR, "S_matrix.dat"), S_matrix)
+MagnetostaticsFEM.save_data_serialized(joinpath(MATRICES_DIR, "M_matrix.dat"), M_matrix)
+MagnetostaticsFEM.save_data_serialized(joinpath(MATRICES_DIR, "f_re_vector.dat"), f_re_vector)
 
 # Load matrices and vector (example)
-S_loaded = MagnetostaticsFEM.load_data_serialized(joinpath(output_dir, "S_matrix.dat"))
-M_loaded = MagnetostaticsFEM.load_data_serialized(joinpath(output_dir, "M_matrix.dat"))
-f_re_loaded = MagnetostaticsFEM.load_data_serialized(joinpath(output_dir, "f_re_vector.dat"))
+S_loaded = MagnetostaticsFEM.load_data_serialized(joinpath(MATRICES_DIR, "S_matrix.dat"))
+M_loaded = MagnetostaticsFEM.load_data_serialized(joinpath(MATRICES_DIR, "M_matrix.dat"))
+f_re_loaded = MagnetostaticsFEM.load_data_serialized(joinpath(MATRICES_DIR, "f_re_vector.dat"))
 
 # Basic check of loaded data
 @assert S_matrix ≈ S_loaded "Loaded S matrix does not match original."
@@ -151,34 +149,34 @@ f_complex_vec = Complex.(f_re_loaded, f_im_vector) # Ensure it's complex vector
 
 for current_ω_test in ω_values_test
     println("\nSolving for ω = $(current_ω_test) rad/s using S, M, f:")
-    
+
     # Form the complex system matrix A_complex = S + jωM
     A_complex = S_loaded + im * current_ω_test * M_loaded
-    
+
     # Solve the complex linear system
     u_complex_dofs = A_complex \ f_complex_vec
-    
+
     println("Solved system. First 3 DoFs (complex): $(u_complex_dofs[1:min(3,end)])")
 
     # If current_ω_test is the original ω, compare with the original solution from solve_fem_problem
     if abs(current_ω_test - ω) < 1e-9 # Compare floating point numbers carefully
         println("Comparing with original solution (from solve_fem_problem at ω = $(ω)):")
-        
+
         u_orig_dofs = get_free_dof_values(u) # Real part from original solution
         v_orig_dofs = get_free_dof_values(v) # Imaginary part from original solution
-        
+
         u_re_from_SMf = real(u_complex_dofs)
         u_im_from_SMf = imag(u_complex_dofs)
-        
+
         # Print max differences for verification
         max_diff_re = maximum(abs.(u_re_from_SMf - u_orig_dofs))
         max_diff_im = maximum(abs.(u_im_from_SMf - (-v_orig_dofs))) # or abs.(u_im_from_SMf + v_orig_dofs)
         println("Max difference in real part: $(max_diff_re)")
         println("Max difference in imaginary part (u_im_SMf vs -v_orig): $(max_diff_im)")
-        
+
         # Add assertions for automated testing (adjust tolerance as needed)
         # Tolerance might need to be adjusted based on solver precision and problem conditioning
-        tolerance = 1e-8 
+        tolerance = 1e-8
         @assert max_diff_re < tolerance "Real parts do not match original solution within tolerance $(tolerance)."
         @assert max_diff_im < tolerance "Imaginary parts (after sign correction) do not match original solution within tolerance $(tolerance)."
         println("Solution from S, M, f matches original solution (with sign correction for imaginary part) at ω = $(ω).")
@@ -243,7 +241,7 @@ for p in [p1, p2, p3, p4]
 end
 
 plt_mag = plot(p1, p2, p3, p4, layout=(4,1), size=(800, 1200))
-savefig(plt_mag, joinpath(paths["OUTPUT_DIR"], "magnetodynamics_harmonic_coupled_magnitudes.pdf"))
+savefig(plt_mag, joinpath(OUT_DIR, "magnetodynamics_harmonic_coupled_magnitudes.pdf"))
 display(plt_mag)
 
 # %% [markdown]
@@ -258,17 +256,17 @@ anim = @animate for t_step in t_vec
     # Calculate instantaneous real value: Re( (u+iv) * exp(jωt) ) = u*cos(ωt) - v*sin(ωt)
     cos_wt = cos(ω * t_step)
     sin_wt = sin(ω * t_step)
-    
+
     Az_inst = u * cos_wt - v * sin_wt
     B_re_inst = B_re * cos_wt - B_im * sin_wt # Instantaneous B_re
     Jeddy_inst = J_eddy_re * cos_wt - J_eddy_im * sin_wt
-    
+
     # Evaluate at interpolation points
     Az_inst_vals = Az_inst(coord)
     B_re_inst_vals = B_re_inst(coord)
     By_inst_vals = [b[1] for b in B_re_inst_vals] # Extract y-component
     Jeddy_inst_vals = Jeddy_inst(coord)
-    
+
     # Get magnitude limits for consistent y-axis scaling
     Az_max = maximum(Az_mag_vals)
     By_max = maximum(B_mag_vals)
@@ -287,11 +285,10 @@ anim = @animate for t_step in t_vec
         label_y = plot_ylims[1] - 0.08 * (plot_ylims[2] - plot_ylims[1])
         annotate!(p, [(midpoints[i]*1e2, label_y, text(region_labels[i], 8, :center, :top)) for i in eachindex(midpoints)])
     end
-    
+
     plot(p1_t, p2_t, p3_t, p4_t, layout=(4,1), size=(800, 1200))
 end
 
-gif(anim, joinpath(paths["OUTPUT_DIR"], @sprintf("magnetodynamics_harmonic_coupled_animation(f=%.2e).gif", freq)), fps = 15)
+gif(anim, joinpath(OUT_DIR, @sprintf("magnetodynamics_harmonic_coupled_animation(f=%.2e).gif", freq)), fps = 15)
 
 # %%
-
