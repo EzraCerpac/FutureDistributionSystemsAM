@@ -37,6 +37,37 @@ function calculate_b_field(Az::Vector{ComplexF64})
     error("calculate_b_field for Vector{ComplexF64} is not implemented yet.")
 end
 
+function save_results_vtk(Ω::Triangulation, output_file_base::String, fields_dict::Dict{String, Any}; append::Bool=false)
+    # Ensure the output directory exists
+    output_dir = dirname(output_file_base)
+    if !isdir(output_dir)
+        mkpath(output_dir)
+    end
+
+    base_name = first(splitext(output_file_base))
+    full_output_path = base_name * ".vtk"
+    
+    try
+        Gridap.writevtk(Ω, full_output_path; cellfields=fields_dict)
+        println("Successfully saved results to $(full_output_path)")
+    catch e
+        println("Error saving single VTK file: $(e)")
+        println("Attempting to save components individually...")
+        # Fallback: Save each component to a separate file if the combined save fails
+        for (name, field) in fields_dict
+            individual_output_path = base_name * "_" * name * ".vtk"
+            try
+                # Removing explicit append here as well.
+                Gridap.writevtk(Ω, individual_output_path; cellfields=Dict(name => field))
+                println("Successfully saved $(name) to $(individual_output_path)")
+            catch individual_e
+                println("Failed to save component $(name). Error: $(individual_e)")
+            end
+        end
+    end
+end
+
+
 """
     save_results_vtk(Ω, filenamebase, fields::Dict; save_time_series::Bool=false, ω::Union{Float64, Nothing}=nothing, nframes::Int=20)
 
