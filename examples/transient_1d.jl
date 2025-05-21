@@ -4,15 +4,20 @@
 include(joinpath(dirname(@__DIR__), "config.jl"))
 paths = get_project_paths("examples") # For OUT_DIR, GEO_DIR etc.
 GEO_DIR = paths["GEO_DIR"]
+OUT_DIR = paths["OUT_DIR"] # Ensure OUT_DIR is defined here
 include("../src/MagnetostaticsFEM.jl")
+include("../src/transient_solver.jl") # Added
+include("../src/post_processing.jl") # Added
 
 using LinearAlgebra
 using Plots
 using LaTeXStrings
 using Gridap
 using .MagnetostaticsFEM # This brings all exported functions into scope
+using .TransientSolver    # Added
+using .PostProcessing     # Added
 using Printf # For animation title formatting
-# FFTW is used by SignalProcessing module, Plots by Visualisation
+# FFTW is used by SignalProcessing module (within MagnetostaticsFEM), Plots by Visualisation (within MagnetostaticsFEM)
 
 println("--- Starting Transient 1D Magnetodynamics Example ---")
 
@@ -26,15 +31,17 @@ freq = 50.0          # Frequency of the source current [Hz]
 ω_source = 2 * pi * freq # Angular frequency [rad/s]
 
 # --- FEM Parameters ---
-order = 2 # Order for transient simulation
+order_fem = 2 # Order for transient simulation (renamed from 'order' to avoid conflicts)
 dirichlet_tag = "D"
-# Dirichlet BC Az=0. Define for g(t)=(x->val) and g(x,t) to satisfy different Gridap internals.
-dirichlet_bc_func(t::Float64) = x -> 0.0  # For TransientTrialFESpace construction via g(t)
-dirichlet_bc_func(x::Point, t::Real) = 0.0 # For time_derivative_f (accepts ForwardDiff.Dual for t)
+
+# Define a single dirichlet_bc_func with multiple dispatch a la original script
+dirichlet_bc_func(t::Float64) = x -> 0.0  # For TransientTrialFESpace g(t) -> h(x)
+dirichlet_bc_func(x::Point, t::Real) = 0.0 # For Gridap internals needing g(x,t) (e.g. for derivatives)
 
 # --- Transient Simulation Parameters ---
 t0 = 0.0
-tF = 5 / freq # Simulate for 5 periods
+periods_to_simulate = 5
+tF = periods_to_simulate / freq # Simulate for 5 periods
 num_steps_per_period = 50
 num_periods_collect_fft = 3 # Use last N periods for FFT to avoid initial transient effects
 Δt = (1/freq) / num_steps_per_period # Time step size
@@ -42,104 +49,48 @@ num_periods_collect_fft = 3 # Use last N periods for FFT to avoid initial transi
 
 # --- Output Parameters ---
 mesh_file = joinpath(GEO_DIR, "coil_geo.msh")
-pvd_output_base = joinpath(OUT_DIR, "transient_1d_results_jl") # Added _jl to distinguish
+pvd_output_base = joinpath(OUT_DIR, "transient_1d_results_jl") 
 fft_plot_path = joinpath(OUT_DIR, "transient_1d_fft.pdf")
 time_signal_plot_path = joinpath(OUT_DIR, "transient_1d_signal.pdf")
 
 println("Mesh file: ", mesh_file)
 println("Output PVD base: ", pvd_output_base)
 
-# %% Load Mesh and Define Domains/Materials
-model, labels, tags = MagnetostaticsFEM.load_mesh_and_tags(mesh_file)
-Ω = Triangulation(model)
-degree = 2*order # Quadrature degree
-dΩ = Measure(Ω, degree)
+# %% Call the new preparation and solving function from TransientSolver
+solution_transient_iterable, Az0, Ω, ν_cf_out, σ_cf_out, Js_t_func_out, model_out, tags_cf_out, labels_out = 
+    TransientSolver.prepare_and_solve_transient_1d(
+        mesh_file,
+        order_fem, 
+        dirichlet_tag,
+        dirichlet_bc_func,  # Pass the single multi-dispatch function
+        μ0,
+        μr_core,
+        σ_core,
+        J0_amplitude,
+        ω_source,
+        t0,
+        tF,
+        Δt,
+        θ_method
+    )
 
-material_tags_dict = MagnetostaticsFEM.get_material_tags(labels)
-ν_func_map = MagnetostaticsFEM.define_reluctivity(material_tags_dict, μ0, μr_core)
-σ_func_map = MagnetostaticsFEM.define_conductivity(material_tags_dict, σ_core)
+# %% Post-processing:
+x_probe = VectorValue(-0.03) # Probe point at x=-0.03
+steps_for_fft_start_time = tF - (num_periods_collect_fft / freq)
 
-# Create CellFields for ν and σ (assumed constant in time for linear transient)
-cell_tags_cf = CellField(tags, Ω) # Helper CellField of tags
-ν_cf = Operation(ν_func_map)(cell_tags_cf)
-σ_cf = Operation(σ_func_map)(cell_tags_cf)
+processed_pvd_filename_base = first(splitext(pvd_output_base)) # Get base for PVD function
 
-# --- Define Time-Dependent Source Current Js(x,t) ---
-# spatial_js_profile_func expects an integer tag, not a point.
-# We need to evaluate the tag at point x using cell_tags_cf.
-spatial_js_profile_func = MagnetostaticsFEM.define_current_density(material_tags_dict, J0_amplitude)
-Js_t_func(t) = x -> spatial_js_profile_func(cell_tags_cf(x)) * sin(ω_source * t)
+time_steps_for_fft, time_signal_data = PostProcessing.save_pvd_and_extract_signal(
+    solution_transient_iterable,
+    Az0,
+    Ω,
+    processed_pvd_filename_base, # Pass the base name for PVD files
+    t0,
+    x_probe,
+    steps_for_fft_start_time,
+)
 
-# %% Setup Transient FE Spaces
-reffe = ReferenceFE(lagrangian, Float64, order)
-V0_test = TestFESpace(model, reffe, dirichlet_tags=[dirichlet_tag])
-# Pass the g(t) version; Julia's dispatch will pick dirichlet_bc_func(t::Float64)
-Ug_transient = TransientTrialFESpace(V0_test, dirichlet_bc_func) 
-
-# %% Initial Condition
-Az0 = zero(Ug_transient(t0)) # Uses Ug_transient(t0) which calls dirichlet_bc_func(t0)
-
-# %% Setup Transient Operator
-transient_op = MagnetostaticsFEM.setup_transient_operator(Ug_transient, V0_test, dΩ, σ_cf, ν_cf, Js_t_func)
-
-# %% Setup ODE Solver
-linear_solver_for_ode = LUSolver()
-odesolver = ThetaMethod(linear_solver_for_ode, Δt, θ_method)
-
-# %% Solve Transient Problem
-println("Solving transient problem from t=$(t0) to t=$(tF) with Δt=$(Δt)...")
-solution_transient_iterable = MagnetostaticsFEM.solve_transient_problem(transient_op, odesolver, t0, tF, Az0)
-println("Transient solution obtained (iterable).")
-
-# %% Post-processing: Extract Signal and Save PVD
-x_probe = VectorValue(0.0) # Probe point at x=0
-time_signal_data = Float64[]
-time_steps_for_fft = Float64[]
-
-println("Extracting solution at probe point $(x_probe) and saving PVD...")
-processed_pvd_filename_base = first(splitext(pvd_output_base))
-
-# Ensure Gridap.Visualization is accessible for createpvd/createvtk if not fully qualified
-# MagnetostaticsFEM.Visualisation should handle this if its using Gridap.Visualization
-
-createpvd(processed_pvd_filename_base) do pvd_file
-    # Save initial condition
-    # Using MagnetostaticsFEM.save_transient_pvd structure as a guide for direct PVD manipulation here
-    try
-        pvd_file[t0] = createvtk(Ω, processed_pvd_filename_base * "_t0_snapshot", cellfields=Dict("Az" => Az0))
-        println("Saved initial condition to PVD.")
-    catch e_pvd_init
-        println("Error saving initial condition to PVD: $e_pvd_init")
-    end
-
-    steps_for_fft_start_time = tF - (num_periods_collect_fft / freq)
-
-    for (i, (Az_n, tn)) in enumerate(solution_transient_iterable)
-        try
-            # Ensure filename compatibility for createvtk, avoid issues with '.' from Printf
-            tn_str_for_file = replace(Printf.@sprintf("%.4f", tn), "." => "p")
-            pvd_file[tn] = createvtk(Ω, processed_pvd_filename_base * "_t$(tn_str_for_file)_snapshot", cellfields=Dict("Az" => Az_n))
-        catch e_pvd_step
-            println("Error saving step t=$tn to PVD: $e_pvd_step")
-        end
-        
-        if tn >= steps_for_fft_start_time
-            push!(time_steps_for_fft, tn)
-            try
-                push!(time_signal_data, Az_n(x_probe))
-            catch e_probe
-                println("Warning: Could not evaluate Az_n at probe point $(x_probe) for t=$(tn). Error: $e_probe. Storing NaN.")
-                push!(time_signal_data, NaN)
-            end
-        end
-
-        if i % 20 == 0 
-            println("Processed PVD save for t=$(@sprintf("%.4f", tn))")
-        end
-    end
-end
-println("Finished PVD saving to $(processed_pvd_filename_base).pvd")
-
+# %% Process extracted signal (same as before)
 valid_indices = .!isnan.(time_signal_data)
 time_steps_for_fft = time_steps_for_fft[valid_indices]
 time_signal_data = time_signal_data[valid_indices]

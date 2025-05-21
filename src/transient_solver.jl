@@ -1,13 +1,16 @@
 module TransientSolver
 
 using Gridap
-using Gridap.ODEs # Base ODEs module
-using Gridap.ODEs.TransientFETools # For FE specific transient tools in v0.17
-using Gridap.ODEs.ODETools # For general ODE solver tools in v0.17
+using Gridap.ODEs
+using Gridap.ODEs.TransientFETools
+using Gridap.ODEs.ODETools
+using LinearAlgebra
 
-# FESpace, Measure, CellField, FEFunction are assumed to come from `using Gridap`
+using ..MagnetostaticsFEM: load_mesh_and_tags, get_material_tags, define_reluctivity, define_conductivity, define_current_density
+
 
 export setup_transient_operator, solve_transient_problem
+export prepare_and_solve_transient_1d # New export
 
 """
     setup_transient_operator(
@@ -94,6 +97,88 @@ function solve_transient_problem(
     # solve(::ODETools.ODESolver, ::TransientFETools.TransientFEOperator, init_condition::Any, t0::Real, tF::Real)
     solution_iterable = solve(odesolver, op, uh0, t0, tF) 
     return solution_iterable
+end
+
+"""
+    prepare_and_solve_transient_1d(
+        mesh_file::String,
+        order::Int,
+        dirichlet_tag::String,
+        dirichlet_bc_function::Function, # Single BC function with multiple dispatch methods
+         # Module like MagnetostaticsFEM
+        μ0::Float64,
+        μr_core::Float64,
+        σ_core::Float64,
+        J0_amplitude::Float64,
+        ω_source::Float64,
+        t0::Float64,
+        tF::Float64,
+        Δt::Float64,
+        θ_method::Float64
+    ) -> Tuple{Any, FEFunction, Triangulation, CellField, CellField, Function}
+
+Prepares the FE model, sets up, and solves the transient 1D magnetodynamics problem.
+Returns the solution iterable, initial condition Az0, Triangulation Ω,
+CellFields ν_cf and σ_cf, and the time-dependent source function Js_t_func.
+This function encapsulates the setup and solve steps from `examples/transient_1d.jl`.
+"""
+function prepare_and_solve_transient_1d(
+    mesh_file::String,
+    order_fem::Int, # Renamed from order to avoid conflict with reffe
+    dirichlet_tag::String,
+    dirichlet_bc_function::Function, # Single BC function with multiple dispatch methods
+    μ0::Float64,
+    μr_core::Float64,
+    σ_core::Float64,
+    J0_amplitude::Float64,
+    ω_source::Float64,
+    t0::Float64,
+    tF::Float64,
+    Δt::Float64,
+    θ_method::Float64
+)
+    println("--- Preparing Transient 1D Simulation ---")
+    println("Loading mesh and defining domains/materials...")
+    model, labels, tags = load_mesh_and_tags(mesh_file)
+    Ω = Triangulation(model)
+    degree_quad = 2*order_fem # Quadrature degree
+    dΩ = Measure(Ω, degree_quad)
+
+    material_tags_dict = get_material_tags(labels)
+    ν_func_map = define_reluctivity(material_tags_dict, μ0, μr_core)
+    σ_func_map = define_conductivity(material_tags_dict, σ_core)
+
+    cell_tags_cf = CellField(tags, Ω) # Helper CellField of tags
+    ν_cf = Operation(ν_func_map)(cell_tags_cf)
+    σ_cf = Operation(σ_func_map)(cell_tags_cf)
+
+    spatial_js_profile_func = define_current_density(material_tags_dict, J0_amplitude)
+    # Js_t_func now uses the dirichlet_bc_function style for consistency if needed,
+    # though for current it's Js_t_func(t)(x)
+    Js_t_func(t) = x -> spatial_js_profile_func(cell_tags_cf(x)) * sin(ω_source * t)
+
+    println("Setting up transient FE spaces...")
+    reffe = ReferenceFE(lagrangian, Float64, order_fem)
+    V0_test = TestFESpace(model, reffe, dirichlet_tags=[dirichlet_tag])
+    # Pass the single, multi-dispatch BC function
+    Ug_transient = TransientTrialFESpace(V0_test, dirichlet_bc_function) 
+
+    println("Defining initial condition...")
+    Az0 = zero(Ug_transient(t0)) # Uses Ug_transient(t0)
+
+    println("Setting up transient operator...")
+    # The Js_t_func is passed directly to the operator
+    transient_op = setup_transient_operator(Ug_transient, V0_test, dΩ, σ_cf, ν_cf, Js_t_func)
+
+    println("Setting up ODE solver...")
+    linear_solver_for_ode = LUSolver()
+    odesolver = ThetaMethod(linear_solver_for_ode, Δt, θ_method)
+
+    println("Solving transient problem from t=$(t0) to t=$(tF) with Δt=$(Δt)...")
+    solution_transient_iterable = solve_transient_problem(transient_op, odesolver, t0, tF, Az0)
+    println("Transient solution obtained (iterable).")
+
+    return solution_transient_iterable, Az0, Ω, ν_cf, σ_cf, Js_t_func, model, cell_tags_cf, labels
 end
 
 end # module TransientSolver 

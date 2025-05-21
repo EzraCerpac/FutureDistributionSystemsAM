@@ -1,7 +1,13 @@
+module PostProcessing
+
 using Gridap
-using WriteVTK # Still needed for single file saving
+using Printf
+using WriteVTK # Still needed for single file saving (though not directly by new func)
 using Gridap.MultiField: MultiFieldFEFunction
 using Gridap.Visualization: createpvd, createvtk, vtk_save, VTKCellData # Ensure createvtk is imported
+
+export calculate_b_field, save_results_vtk, calculate_eddy_current # Existing exports
+export save_pvd_and_extract_signal # New export
 
 """
     calculate_b_field(Az) -> B
@@ -236,3 +242,84 @@ function calculate_eddy_current(uv::MultiFieldFEFunction, conductivity_func, ome
     J_eddy_im = (omega * σ) * u
     return J_eddy_re, J_eddy_im
 end
+
+"""
+    save_pvd_and_extract_signal(
+        solution_iterable, 
+        Az0::FEFunction, 
+        Ω::Triangulation, 
+        pvd_filename_base::String, 
+        t0::Float64, 
+        x_probe::Union{Point, VectorValue}, 
+        steps_for_fft_start_time::Float64,
+        freq::Float64,
+        num_periods_collect_fft::Real # Can be Int or Float
+    ) -> Tuple{Vector{Float64}, Vector{Float64}}
+
+Saves transient solution snapshots to a PVD file and extracts the time signal of Az at a probe point.
+This function is adapted from the post-processing block in `examples/transient_1d.jl`.
+"""
+function save_pvd_and_extract_signal(
+    solution_iterable, 
+    Az0::FEFunction, 
+    Ω::Triangulation, 
+    pvd_filename_base::String, 
+    t0::Float64, 
+    x_probe::Union{Point, VectorValue}, 
+    steps_for_fft_start_time::Float64,
+)
+    time_signal_data = Float64[]
+    time_steps_for_fft = Float64[]
+
+    println("Extracting solution at probe point $(x_probe) and saving PVD to $(pvd_filename_base).pvd...")
+    
+    # Ensure Gridap.Visualization is accessible for createpvd/createvtk
+    createpvd(pvd_filename_base) do pvd_file
+        # Save initial condition
+        try
+            # Using a slightly more robust naming for snapshot files
+            pvd_file[t0] = createvtk(Ω, pvd_filename_base * "_t_initial_snapshot", cellfields=Dict("Az" => Az0))
+            println("Saved initial condition to PVD.")
+        catch e_pvd_init
+            println("Error saving initial condition to PVD: $e_pvd_init")
+        end
+
+        for (i, (Az_n, tn)) in enumerate(solution_iterable)
+            try
+                # Ensure filename compatibility for createvtk, avoid issues with '.' from Printf
+                tn_str_for_file = replace(Printf.@sprintf("%.4f", tn), "." => "p")
+                pvd_file[tn] = createvtk(Ω, pvd_filename_base * "_t_$(tn_str_for_file)_snapshot", cellfields=Dict("Az" => Az_n))
+            catch e_pvd_step
+                println("Error saving step t=$tn to PVD: $e_pvd_step")
+            end
+            
+            if tn >= steps_for_fft_start_time
+                push!(time_steps_for_fft, tn)
+                try
+                    probe_val = Az_n(x_probe)
+                    # Ensure probe_val is scalar Float64 if Az_n(x_probe) returns a single-element array or similar
+                    if isa(probe_val, AbstractArray) && length(probe_val) == 1
+                        push!(time_signal_data, first(probe_val))
+                    elseif isa(probe_val, Number)
+                        push!(time_signal_data, Float64(probe_val))
+                    else
+                        println("Warning: Probe value at t=$(tn) is not a scalar Number or single-element array. Type: $(typeof(probe_val)). Storing NaN.")
+                        push!(time_signal_data, NaN)
+                    end
+                catch e_probe
+                    println("Warning: Could not evaluate Az_n at probe point $(x_probe) for t=$(tn). Error: $e_probe. Storing NaN.")
+                    push!(time_signal_data, NaN)
+                end
+            end
+
+            if i % 20 == 0 
+                println("Processed PVD save for t=$(@sprintf("%.4f", tn))")
+            end
+        end
+    end
+    println("Finished PVD saving to $(pvd_filename_base).pvd")
+    
+    return time_steps_for_fft, time_signal_data
+end
+
+end # module PostProcessing
