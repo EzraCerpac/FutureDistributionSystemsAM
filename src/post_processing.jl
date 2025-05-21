@@ -5,9 +5,10 @@ using Printf
 using WriteVTK # Still needed for single file saving (though not directly by new func)
 using Gridap.MultiField: MultiFieldFEFunction
 using Gridap.Visualization: createpvd, createvtk, vtk_save, VTKCellData # Ensure createvtk is imported
+using Gridap.FESpaces: FEFunction # Added for type hint
 
 export calculate_b_field, save_results_vtk, calculate_eddy_current # Existing exports
-export save_pvd_and_extract_signal # New export
+export save_pvd_and_extract_signal, save_transient_pvd # New export
 
 """
     calculate_b_field(Az) -> B
@@ -320,6 +321,38 @@ function save_pvd_and_extract_signal(
     println("Finished PVD saving to $(pvd_filename_base).pvd")
     
     return time_steps_for_fft, time_signal_data
+end
+
+"""
+    save_transient_pvd(Ω_static::Triangulation, uh_solution_iterable, pvd_filename_base::String; uh0::Union{FEFunction, Nothing}=nothing)
+
+Saves transient simulation results to a PVD file collection.
+Iterates through the `uh_solution_iterable` (typically from `solve(odesolver, ...)`).
+`uh0` is the optional initial condition FEFunction to save as time step 0.
+"""
+function save_transient_pvd(Ω_static::Triangulation, uh_solution_iterable, pvd_filename_base::String; uh0::Union{FEFunction, Nothing}=nothing)
+    output_dir = dirname(pvd_filename_base)
+    if output_dir != "" && !isdir(output_dir)
+        mkpath(output_dir)
+    end
+    base_name_no_ext = first(splitext(pvd_filename_base))
+
+    println("Saving transient results to PVD collection: $(base_name_no_ext).pvd")
+    
+    createpvd(base_name_no_ext) do pvd
+        if uh0 !== nothing
+            vtk_file_t0 = joinpath(output_dir, "$(first(splitext(basename(base_name_no_ext))))_t0")
+            pvd[0.0] = createvtk(Ω_static, vtk_file_t0, cellfields=Dict("Az" => uh0))
+            println("Saved initial condition to $(vtk_file_t0).vtu")
+        end
+        
+        for (i, (uh_n, t_n)) in enumerate(uh_solution_iterable)
+            vtk_file_tn = joinpath(output_dir, "$(first(splitext(basename(base_name_no_ext))))_t$(@sprintf("%.4f", t_n))")
+            pvd[t_n] = createvtk(Ω_static, vtk_file_tn, cellfields=Dict("Az" => uh_n))
+            println("Saved frame for t=$(@sprintf("%.4f", t_n)) to $(vtk_file_tn).vtu")
+        end
+    end
+    println("PVD collection saved.")
 end
 
 end # module PostProcessing

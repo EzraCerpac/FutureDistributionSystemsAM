@@ -6,18 +6,19 @@ paths = get_project_paths("examples") # For OUT_DIR, GEO_DIR etc.
 GEO_DIR = paths["GEO_DIR"]
 OUT_DIR = paths["OUT_DIR"] # Ensure OUT_DIR is defined here
 include("../src/MagnetostaticsFEM.jl")
-include("../src/transient_solver.jl") # Added
-include("../src/post_processing.jl") # Added
+# include("../src/transient_solver.jl") # Already in MagnetostaticsFEM
+# include("../src/post_processing.jl") # Already in MagnetostaticsFEM
+# include("../src/visualisation.jl")   # Already in MagnetostaticsFEM
 
 using LinearAlgebra
 using Plots
 using LaTeXStrings
 using Gridap
 using .MagnetostaticsFEM # This brings all exported functions into scope
-using .TransientSolver    # Added
-using .PostProcessing     # Added
+# using .TransientSolver    # Now part of MagnetostaticsFEM
+# using .PostProcessing     # Now part of MagnetostaticsFEM
 using Printf # For animation title formatting
-# FFTW is used by SignalProcessing module (within MagnetostaticsFEM), Plots by Visualisation (within MagnetostaticsFEM)
+# using .Visualisation # Now part of MagnetostaticsFEM
 
 println("--- Starting Transient 1D Magnetodynamics Example ---")
 
@@ -44,7 +45,7 @@ periods_to_simulate = 5
 tF = periods_to_simulate / freq # Simulate for 5 periods
 num_steps_per_period = 50
 num_periods_collect_fft = 3 # Use last N periods for FFT to avoid initial transient effects
-Δt = (1/freq) / num_steps_per_period # Time step size
+Δt_val = (1/freq) / num_steps_per_period # Time step size, renamed to Δt_val to avoid conflict with module Δt
 θ_method = 0.5 # Crank-Nicolson (0.5), BE (1.0), FE (0.0)
 
 # --- Output Parameters ---
@@ -57,12 +58,12 @@ println("Mesh file: ", mesh_file)
 println("Output PVD base: ", pvd_output_base)
 
 # %% Call the new preparation and solving function from TransientSolver
-solution_transient_iterable, Az0, Ω, ν_cf_out, σ_cf_out, Js_t_func_out, model_out, tags_cf_out, labels_out = 
-    TransientSolver.prepare_and_solve_transient_1d(
+solution_transient_iterable, Az0_out, Ω_out, ν_cf_out, σ_cf_out, Js_t_func_out, model_out, tags_cf_out, labels_out = 
+    MagnetostaticsFEM.prepare_and_solve_transient_1d( # Called via MagnetostaticsFEM module
         mesh_file,
         order_fem, 
         dirichlet_tag,
-        dirichlet_bc_func,  # Pass the single multi-dispatch function
+        dirichlet_bc_func,  
         μ0,
         μr_core,
         σ_core,
@@ -70,21 +71,21 @@ solution_transient_iterable, Az0, Ω, ν_cf_out, σ_cf_out, Js_t_func_out, model
         ω_source,
         t0,
         tF,
-        Δt,
+        Δt_val, # Pass renamed Δt_val
         θ_method
     )
 
 # %% Post-processing:
-x_probe = VectorValue(-0.03) # Probe point at x=-0.03
+x_probe = VectorValue(-0.03) 
 steps_for_fft_start_time = tF - (num_periods_collect_fft / freq)
 
-processed_pvd_filename_base = first(splitext(pvd_output_base)) # Get base for PVD function
+processed_pvd_filename_base = first(splitext(pvd_output_base)) 
 
-time_steps_for_fft, time_signal_data = PostProcessing.save_pvd_and_extract_signal(
+time_steps_for_fft, time_signal_data = MagnetostaticsFEM.save_pvd_and_extract_signal( # Called via MagnetostaticsFEM
     solution_transient_iterable,
-    Az0,
-    Ω,
-    processed_pvd_filename_base, # Pass the base name for PVD files
+    Az0_out, # Pass Az0_out
+    Ω_out,   # Pass Ω_out
+    processed_pvd_filename_base, 
     t0,
     x_probe,
     steps_for_fft_start_time,
@@ -96,7 +97,7 @@ time_steps_for_fft = time_steps_for_fft[valid_indices]
 time_signal_data = time_signal_data[valid_indices]
 
 if isempty(time_steps_for_fft)
-    error("No time points collected for FFT. Check simulation time (tF=$(tF), Δt=$(Δt)), collection window, or probe point.\nCollected $(length(time_signal_data)) points before NaN filter.")
+    error("No time points collected for FFT. Check simulation time (tF=$(tF), Δt=$(Δt_val)), collection window, or probe point.\nCollected $(length(time_signal_data)) points before NaN filter.")
 end
 
 MagnetostaticsFEM.plot_time_signal(time_steps_for_fft, time_signal_data, 
@@ -105,7 +106,7 @@ MagnetostaticsFEM.plot_time_signal(time_steps_for_fft, time_signal_data,
 
 # %% FFT Analysis
 println("Performing FFT analysis...")
-sampling_rate = 1/Δt 
+sampling_rate = 1/Δt_val # Use Δt_val
 
 fft_frequencies, fft_magnitudes = MagnetostaticsFEM.perform_fft(time_signal_data, sampling_rate)
 
@@ -123,7 +124,7 @@ if !isempty(fft_magnitudes) && !isempty(fft_frequencies)
         println("  - Peak Amplitude (from FFT): $(max_magnitude_fft)")
         println("  - Frequency at Peak: $(peak_frequency_fft) Hz")
         
-        freq_resolution = sampling_rate / length(time_signal_data) # Approximate resolution
+        freq_resolution = sampling_rate / length(time_signal_data) 
         if abs(peak_frequency_fft - freq) < freq_resolution 
             println("  - FFT peak frequency matches source frequency of $(freq) Hz.")
         else
@@ -142,5 +143,20 @@ println("The peak amplitude from FFT ($(isdefined(Main, :max_magnitude_fft) ? ma
 println("can be compared with the magnitude of Az from a frequency-domain solution at $(freq) Hz using J0_amplitude.")
 
 println("\n--- Transient 1D example finished successfully! ---")
+
+# %% Generate Animation
+println("\nGenerating transient animation...")
+transient_animation_path = joinpath(OUT_DIR, "transient_1d_animation.gif")
+MagnetostaticsFEM.create_transient_animation(
+    Ω_out, 
+    solution_transient_iterable, 
+    σ_cf_out, # Pass conductivity CellField
+    Δt_val,   # Pass time step value
+    Az0_out,  # Pass initial condition FEFunction
+    transient_animation_path, 
+    fps=10,
+    consistent_axes=true # Optional: use consistent axes
+)
+println("Animation generation process initiated. Check console for progress/completion.")
 
 # %% End of script

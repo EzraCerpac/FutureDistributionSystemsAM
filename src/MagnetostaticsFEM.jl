@@ -44,14 +44,15 @@ export TransientTrialFESpace # Now imported from Gridap.ODEs.TransientFETools
 export solve_fem_problem, get_fem_matrices_and_vector, save_data_serialized, load_data_serialized
 
 # From post_processing.jl
-export calculate_b_field, calculate_eddy_current, save_results_vtk
+using .PostProcessing # Make its exports available
+export calculate_b_field, calculate_eddy_current, save_results_vtk, save_pvd_and_extract_signal, save_transient_pvd
 
 # From mesh_handling.jl
 export load_mesh_and_tags
 
 # From transient_solver.jl (New)
 using .TransientSolver # This module uses qualified names internally like TransientFETools.TypeName
-export setup_transient_operator, solve_transient_problem
+export setup_transient_operator, solve_transient_problem, prepare_and_solve_transient_1d
 
 # For Gridap v0.17, ThetaMethod is likely from Gridap.ODEs.ODETools
 export ThetaMethod # Now imported from Gridap.ODEs.ODETools
@@ -65,6 +66,6 @@ export perform_fft
 
 # From visualisation.jl (Expanded)
 using .Visualisation
-export plot_contour_2d, create_field_animation, save_transient_pvd, plot_time_signal, plot_fft_spectrum
+export plot_contour_2d, create_field_animation, plot_time_signal, plot_fft_spectrum, plot_line_1d, create_transient_animation
 
 end
