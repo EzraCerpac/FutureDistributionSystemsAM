@@ -4,7 +4,7 @@ using  Gmsh: gmsh
 include(joinpath(dirname(dirname(@__FILE__)), "config.jl"))
 
 # Get paths
-paths = get_project_paths("ta_example_1d")
+paths = get_project_paths("ta_example_2d")
 
 println("Base directory: ", paths["BASE_DIR"])
 println("Geometry directory: ", paths["GEO_DIR"])

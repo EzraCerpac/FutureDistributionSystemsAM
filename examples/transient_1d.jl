@@ -26,7 +26,7 @@ freq = 50.0          # Frequency of the source current [Hz]
 ω_source = 2 * pi * freq # Angular frequency [rad/s]
 
 # --- FEM Parameters ---
-order = 1 # Order for transient simulation
+order = 2 # Order for transient simulation
 dirichlet_tag = "D"
 # Dirichlet BC Az=0. Define for g(t)=(x->val) and g(x,t) to satisfy different Gridap internals.
 dirichlet_bc_func(t::Float64) = x -> 0.0  # For TransientTrialFESpace construction via g(t)
