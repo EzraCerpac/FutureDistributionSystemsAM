@@ -12,15 +12,13 @@ using Printf
 using LaTeXStrings
 using WriteVTK
 
-# To access PostProcessing.calculate_b_field. This assumes MagnetostaticsFEM.jl correctly includes and uses PostProcessing.
-# This makes Visualisation dependent on PostProcessing being available in its scope.
-# An alternative is to always require B_field to be passed in if Visualisation is to be kept fully independent.
 using ..PostProcessing
 
 # Helper function to extract scalar value from FE evaluations
 _extract_val(v) = isa(v, Gridap.Fields.ForwardDiff.Dual) ? Gridap.Fields.ForwardDiff.value(v) : (isa(v, AbstractArray) && !isempty(v) ? first(v) : v)
 
-export plot_contour_2d, create_field_animation, plot_time_signal, plot_fft_spectrum, plot_line_1d, create_transient_animation, plot_harmonic_magnitude_1d, plot_harmonic_animation_1d
+export plot_contour_2d, create_field_animation, plot_time_signal, plot_fft_spectrum, plot_line_1d, create_transient_animation, plot_harmonic_magnitude_1d, plot_harmonic_animation_1d,
+       plot_amplitude_comparison, plot_frequency_comparison, plot_profile_comparison
 
 # Hardcoded geometry parameters for now
 a_len = 100.3e-3; b_len = 73.15e-3; c_len = 27.5e-3
@@ -614,6 +612,48 @@ function create_transient_animation(
         println("Error saving GIF: $e. Make sure Plots.jl backend supports GIF or save individual frames.")
     end
     return anim
+end
+
+# --- Comparison plotting functions ---
+
+function plot_amplitude_comparison(transient_amp, harmonic_amp; labels=("Transient (FFT)", "Harmonic (FD)"), output_path=nothing)
+    bar_labels = [labels[1], labels[2]]
+    bar_vals = [transient_amp, harmonic_amp]
+    plt = bar(bar_labels, bar_vals, xlabel="Method", ylabel=L"|A_z|\ \mathrm{[Wb/m]}",
+              title="Peak Amplitude Comparison", legend=false, color=[:blue :orange])
+    if output_path !== nothing
+        savefig(plt, output_path)
+        println("Amplitude comparison plot saved to: $output_path")
+    end
+    display(plt)
+    return plt
+end
+
+function plot_frequency_comparison(transient_freq, harmonic_freq; labels=("Transient (FFT)", "Harmonic (FD)"), output_path=nothing)
+    bar_labels = [labels[1], labels[2]]
+    bar_vals = [transient_freq, harmonic_freq]
+    plt = bar(bar_labels, bar_vals, xlabel="Method", ylabel=L"f\ \mathrm{[Hz]}",
+              title="Peak Frequency Comparison", legend=false, color=[:blue :orange])
+    if output_path !== nothing
+        savefig(plt, output_path)
+        println("Frequency comparison plot saved to: $output_path")
+    end
+    display(plt)
+    return plt
+end
+
+function plot_profile_comparison(x_grid, profile1, profile2; labels=("Transient", "Harmonic"), output_path=nothing, ylabel="Value", title_str="Field Profile Comparison")
+    plt = plot(x_grid, profile1, label=labels[1], lw=2, color=:blue)
+    plot!(plt, x_grid, profile2, label=labels[2], lw=2, color=:orange)
+    xlabel!(plt, L"x\ \mathrm{[m]}")
+    ylabel!(plt, ylabel)
+    title!(plt, title_str)
+    if output_path !== nothing
+        savefig(plt, output_path)
+        println("Profile comparison plot saved to: $output_path")
+    end
+    display(plt)
+    return plt
 end
 
 end # module Visualisation

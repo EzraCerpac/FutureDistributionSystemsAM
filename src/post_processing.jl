@@ -362,17 +362,21 @@ function save_pvd_and_extract_signal(
     solution_iterable, 
     Az0::FEFunction, 
     Ω::Triangulation, 
-    pvd_filename_base::String, 
     t0::Float64, 
     x_probe::Union{Point, VectorValue}, 
     steps_for_fft_start_time::Float64,
     σ_cf::Union{CellField, Function, Number}, 
-    Δt::Float64
+    Δt::Float64;
+    output_dir=nothing,
 )
     time_signal_data = Float64[]
     time_steps_for_fft = Float64[]
 
-    println("Extracting solution at probe point $(x_probe) and saving enhanced PVD with B-field and J_eddy to $(pvd_filename_base).pvd...")
+    if output_dir === nothing
+        error("output_dir must be provided.")
+    end
+
+    pvd_filename_base = joinpath(output_dir, "solution")
     
     # Process transient solution to get B and J_eddy for all steps
     processed_steps = process_transient_solution(solution_iterable, Az0, Ω, σ_cf, Δt)

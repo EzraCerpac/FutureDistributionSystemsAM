@@ -21,6 +21,7 @@ out/
 .cursor/
 .claude/
 CLAUDE.md
+.windsurfrules
 
 # Python
 __pycache__/
