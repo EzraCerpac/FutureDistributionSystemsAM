@@ -37,8 +37,8 @@ wcoil = wgap;
 hcoil = hgap;
 
 # Mesh densities
-lc1 = 2e-2;      # Enclosure & core outer
-lc2 = 5e-3;      # Core inner
+lc1 = 5e-3;      # Enclosure & core outer
+lc2 = 2e-3;      # Core inner
 
 function gmsh_add_rectangle(mid, width, height, lc)
     geo = gmsh.model.geo;
@@ -214,11 +214,11 @@ gmsh.model.setPhysicalName(1, 1, "Enclosure")
 geo.synchronize()
 
 ## Define structured meshes
-N1 = 50;
-N2 = 10;
-N3 = 30;
-alpha = 0.05;
-alpha2 = 0.05;
+N1 = 60;
+N2 = 40;
+N3 = 40;
+alpha = 0.1;
+alpha2 = 0.07;
 
 mesh.setTransfiniteCurve(core_lines1[2], N1, "Bump", alpha)
 mesh.setTransfiniteCurve(core_lines1[3], N1, "Bump", alpha)
