@@ -4,7 +4,7 @@ using  Gmsh: gmsh
 include(joinpath(dirname(dirname(@__FILE__)), "config.jl"))
 
 # Get paths
-paths = get_project_paths("ta_example_1d")
+paths = get_project_paths("examples_2d")
 
 println("Base directory: ", paths["BASE_DIR"])
 println("Geometry directory: ", paths["GEO_DIR"])
@@ -168,14 +168,14 @@ core_lines13 = [l15, l36, l20, l33]; core13_lp = geo.addCurveLoop(core_lines13, 
 
 
 ## Coil
-coil_left_reg, _, _ = gmsh_add_rectangle([-(wlm/2 + wcoil/2), 0], wcoil, hcoil, lc2) 
-coil_right_reg, _, _ = gmsh_add_rectangle([(wlm/2 + wcoil/2), 0], wcoil, hcoil, lc2) 
+coil_left_lines = [l25, l7, l28, l12]; coil_left_lp = geo.addCurveLoop(coil_left_lines, 18, true)
+coil_right_lines = [l31, l9, l34, l14]; coil_right_lp = geo.addCurveLoop(coil_right_lines, 19, true)
 
 ## Surfaces
 geo.addPlaneSurface([sim_domain, core_lp], 1)
 # geo.addPlaneSurface([core_lp, coil_left_reg, coil_right_reg], 2)
-geo.addPlaneSurface([coil_left_reg], 2)
-geo.addPlaneSurface([coil_right_reg], 3)
+# geo.addPlaneSurface([coil_left_lp], 2)
+# geo.addPlaneSurface([coil_right_lp], 3)
 
 core_surf1 = geo.addPlaneSurface([core1_lp])
 core_surf2 = geo.addPlaneSurface([core2_lp])
@@ -191,13 +191,16 @@ core_surf11 = geo.addPlaneSurface([core11_lp])
 core_surf12 = geo.addPlaneSurface([core12_lp])
 core_surf13 = geo.addPlaneSurface([core13_lp])
 
+coil_left_surf = geo.addPlaneSurface([coil_left_lp])
+coil_right_surf = geo.addPlaneSurface([coil_right_lp])
+
 geo.synchronize()
 
 ## Physical Groups
 geo.addPhysicalGroup(2, [1], 1)  # air
 geo.addPhysicalGroup(2, [core_surf1, core_surf2, core_surf3, core_surf4, core_surf5, core_surf6, core_surf7, core_surf8, core_surf9, core_surf10, core_surf11, core_surf12, core_surf13], 2) # Core   
-geo.addPhysicalGroup(2, [2], 3)         # Coil left
-geo.addPhysicalGroup(2, [3], 4)         # Coil right
+geo.addPhysicalGroup(2, [coil_left_surf], 3)         # Coil left
+geo.addPhysicalGroup(2, [coil_right_surf], 4)         # Coil right
 
 geo.addPhysicalGroup(1, enclosure_lines, 1)  # Enclosure boundary
 

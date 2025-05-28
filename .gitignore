@@ -1,3 +1,9 @@
+# Project
+
+**/output/
+src/doc_figures/
+
+
 # JetBrains IDEs
 .idea/
 *.iml
@@ -11,6 +17,7 @@ out/
 .vscode/
 *.code-workspace
 .history/
+.cursor/
 
 # Python
 __pycache__/
@@ -253,6 +260,7 @@ pythontex-files-*/
 
 # macOS
 .DS_Store
+**/.DS_Store
 .AppleDouble
 .LSOverride
 Icon
