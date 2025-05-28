@@ -215,3 +215,33 @@ function load_data_serialized(filepath::String)
     println("Loaded data from $(filepath)")
     return data
 end
+
+function prepare_and_solve_harmonic_1d(mesh_file::String, order::Int, field_type::Type, dirichlet_tag::String, dirichlet_value::ComplexF64, μ0::Float64, μr_core::Float64, σ_core::Float64, J0_amplitude::Float64, ω_source::Float64)
+    # Load mesh and tags
+    model, labels, tags = load_mesh_and_tags(mesh_file)
+
+    # Get material tags dictionary
+    material_tags = get_material_tags(labels)
+
+    # Set up triangulation and measures
+    Ω = Triangulation(model)
+    dΩ = Measure(Ω, 2*order)
+
+    # Define material property functions
+    ν_func_map = define_reluctivity(material_tags, μ0, μr_core)
+    σ_func_map = define_conductivity(material_tags, σ_core)
+    source_current_func = define_current_density(material_tags, J0_amplitude) # Real source
+
+    # Setup FE spaces (multi-field: Real, Imag parts)
+    U, V = setup_fe_spaces(model, order, field_type, dirichlet_tag, dirichlet_value)
+
+    # Define the weak form problem for the coupled system
+    problem = magnetodynamics_harmonic_coupled_weak_form(Ω, dΩ, tags, ν_func_map, σ_func_map, source_current_func, ω_source)
+
+    # Solve the problem
+    solution = solve_fem_problem(problem, U, V)
+
+    Az0 = solution[1] # Real part of Az (t=0)
+
+    return solution, Az0, Ω, ν_func_map, σ_func_map, tags
+end

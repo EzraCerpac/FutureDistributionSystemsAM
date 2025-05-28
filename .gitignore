@@ -2,7 +2,7 @@
 
 **/output/
 src/doc_figures/
-ta_example**/
+ta_example*/
 
 
 # JetBrains IDEs
@@ -19,6 +19,8 @@ out/
 *.code-workspace
 .history/
 .cursor/
+.claude/
+CLAUDE.md
 
 # Python
 __pycache__/

@@ -10,6 +10,7 @@ using Gridap.ReferenceFEs: lagrangian
 using Gridap.Geometry: get_triangulation, get_node_coordinates, num_cell_dims, get_grid, DiscreteModel
 using Printf
 using LaTeXStrings
+using WriteVTK
 
 # To access PostProcessing.calculate_b_field. This assumes MagnetostaticsFEM.jl correctly includes and uses PostProcessing.
 # This makes Visualisation dependent on PostProcessing being available in its scope.
@@ -19,7 +20,99 @@ using ..PostProcessing
 # Helper function to extract scalar value from FE evaluations
 _extract_val(v) = isa(v, Gridap.Fields.ForwardDiff.Dual) ? Gridap.Fields.ForwardDiff.value(v) : (isa(v, AbstractArray) && !isempty(v) ? first(v) : v)
 
-export plot_contour_2d, create_field_animation, plot_time_signal, plot_fft_spectrum, plot_line_1d, create_transient_animation
+export plot_contour_2d, create_field_animation, plot_time_signal, plot_fft_spectrum, plot_line_1d, create_transient_animation, plot_harmonic_magnitude_1d, plot_harmonic_animation_1d
+
+# Hardcoded geometry parameters for now
+a_len = 100.3e-3; b_len = 73.15e-3; c_len = 27.5e-3
+xa1 = -a_len/2; xb1 = -b_len/2; xc1 = -c_len/2
+xc2 = c_len/2; xb2 = b_len/2; xa2 = a_len/2
+boundaries = [xa1, xb1, xc1, xc2, xb2, xa2]
+x_int = collect(range(-0.1, 0.1, length=1000))
+coord = [VectorValue(x_) for x_ in x_int]
+
+function plot_harmonic_magnitude_1d(Az_mag, B_mag, Jeddy_mag, ν_field; output_path=nothing)
+    # Evaluate magnitudes at interpolation points
+    Az_mag_vals = Az_mag(coord)
+    B_mag_vals = B_mag(coord)
+    Jeddy_mag_vals = Jeddy_mag(coord)
+    ν_vals = ν_field(coord) # Evaluate the reluctivity field
+    μ_vals = 1 ./ ν_vals # Convert reluctivity to permeability
+
+    # Calculate midpoints for region labels
+    x_min_plot = minimum(x_int); x_max_plot = maximum(x_int)
+    midpoints = [(x_min_plot + xa1)/2, (xa1 + xb1)/2, (xb1 + xc1)/2, (xc1 + xc2)/2, (xc2 + xb2)/2, (xb2 + xa2)/2, (xa2 + x_max_plot)/2]
+    region_labels = ["Air", "Core", "Coil L", "Core", "Coil R", "Core", "Air"]
+
+    # Plot Magnitudes
+    p1 = plot(x_int * 1e2, Az_mag_vals * 1e5, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"|A_z(x)|\ \mathrm{[mWb/cm]}", color=:black, lw=1, legend=false, title=L"|A_z|" *" Magnitude")
+    p2 = plot(x_int * 1e2, B_mag_vals * 1e3, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"|B_y(x)|\ \mathrm{[mT]}", color=:black, lw=1, legend=false, title=L"|B_y|" *" Magnitude")
+    p3 = plot(x_int * 1e2, Jeddy_mag_vals * 1e-4, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"|J_{eddy}(x)|\ \mathrm{[A/cm^2]}", color=:black, lw=1, legend=false, title=L"|J_{eddy}|" *" Magnitude")
+    p4 = plot(x_int * 1e2, μ_vals, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"\mu(x)\ \mathrm{[m/H]}", color=:black, lw=1, legend=false, title="Permeability (Linear)")
+
+    # Add annotations
+    for p in [p1, p2, p3, p4]
+        vline!(p, boundaries * 1e2, color=:grey, linestyle=:dash, label="")
+        plot_ylims = Plots.ylims(p)
+        label_y = plot_ylims[1] - 0.08 * (plot_ylims[2] - plot_ylims[1])
+        annotate!(p, [(midpoints[i]*1e2, label_y, text(region_labels[i], 8, :center, :top)) for i in eachindex(midpoints)])
+    end
+
+    plt_mag = plot(p1, p2, p3, p4, layout=(4,1), size=(800, 1200))
+    savefig(plt_mag, output_path)
+    display(plt_mag)
+    return plt_mag
+end
+
+function plot_harmonic_animation_1d(solution_harmonic::MultiFieldFEFunction, Ω::Triangulation, ω::Float64; output_path=nothing, fps=15)
+    freq = ω / (2 * pi)
+    T_period = 1/freq
+    t_vec = range(0, T_period, length=100)
+
+    u = solution_harmonic[1]
+    v = solution_harmonic[2]
+
+    anim = @animate for t_step in t_vec
+        # Calculate instantaneous real value: Re( (u+iv) * exp(jωt) ) = u*cos(ωt) - v*sin(ωt)
+        cos_wt = cos(ω * t_step)
+        sin_wt = sin(ω * t_step)
+        
+        Az_inst = u * cos_wt - v * sin_wt
+        B_re_inst = B_re * cos_wt - B_im * sin_wt # Instantaneous B_re
+        Jeddy_inst = J_eddy_re * cos_wt - J_eddy_im * sin_wt
+        
+        # Evaluate at interpolation points
+        Az_inst_vals = Az_inst(coord)
+        B_re_inst_vals = B_re_inst(coord)
+        By_inst_vals = [b[1] for b in B_re_inst_vals] # Extract y-component
+        Jeddy_inst_vals = Jeddy_inst(coord)
+        
+        # Get magnitude limits for consistent y-axis scaling
+        Az_max = maximum(Az_mag_vals)
+        By_max = maximum(B_mag_vals)
+        Jeddy_max = maximum(Jeddy_mag_vals)
+
+        # Plot instantaneous real parts at time t
+        p1_t = plot(x_int * 1e2, Az_inst_vals * 1e5, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"A_z(x,t)\ \mathrm{[mWb/cm]}", color=:blue, lw=1, legend=false, title=@sprintf("Time-Harmonic (t = %.2e s)", t_step), ylims=(-Az_max*1.1e5, Az_max*1.1e5))
+        p2_t = plot(x_int * 1e2, By_inst_vals * 1e3, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"B_y(x,t)\ \mathrm{[mT]}", color=:blue, lw=1, legend=false, ylims=(-By_max*1.1e3, By_max*1.1e3))
+        p3_t = plot(x_int * 1e2, Jeddy_inst_vals * 1e-4, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"J_{eddy}(x,t)\ \mathrm{[A/cm^2]}", color=:red, lw=1, legend=false, ylims=(-Jeddy_max*1.1e-4, Jeddy_max*1.1e-4))
+        p4_t = plot(x_int * 1e2, μ_vals, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"\mu(x)\ \mathrm{[m/H]}", color=:black, lw=1, legend=false, title="Permeability (Linear)")
+
+        # Add annotations
+        for p in [p1_t, p2_t, p3_t, p4_t]
+            vline!(p, boundaries * 1e2, color=:grey, linestyle=:dash, label="")
+            plot_ylims = Plots.ylims(p)
+            label_y = plot_ylims[1] - 0.08 * (plot_ylims[2] - plot_ylims[1])
+            annotate!(p, [(midpoints[i]*1e2, label_y, text(region_labels[i], 8, :center, :top)) for i in eachindex(midpoints)])
+        end
+        
+        plot(p1_t, p2_t, p3_t, p4_t, layout=(4,1), size=(800, 1200))
+    end
+
+    movie = gif(anim, output_path, fps = fps)
+    display(movie)
+    return movie
+end
+
 
 # Helper function to get a representative grid of points for min/max calculation
 function _get_evaluation_points(Ω; num_points_per_dim=30)
@@ -376,8 +469,8 @@ end
         num_eval_points_minmax::Int=20 
     )
 
-Creates a GIF animation of the transient simulation results.
-Includes Az, B, and J_eddy.
+Creates a GIF animation of the transient simulation results using PostProcessing functions.
+Includes Az, B, and J_eddy calculated through the enhanced post-processing pipeline.
 """
 function create_transient_animation(
     Ω,
@@ -392,35 +485,36 @@ function create_transient_animation(
     consistent_axes::Bool=true,
     num_eval_points_minmax::Int=20
 )
-    println("Creating transient field animation with J_eddy...")
+    println("Creating transient field animation using enhanced PostProcessing pipeline...")
     
     dim = num_cell_dims(Ω)
 
-    # Prepare for P1 interpolation, used for caching and plotting if direct plotting fails
+    # Use the enhanced post-processing function to get all fields
+    println("Processing transient solution with B-field and J_eddy calculations...")
+    processed_steps = PostProcessing.process_transient_solution(solution_iterable_input, Az0, Ω, σ_cf, Δt)
+    
+    # Prepare for P1 interpolation for plotting
     reffe_p1_anim = ReferenceFE(lagrangian, Float64, 1)
     model_for_fes_rigging_anim = get_grid(Ω) isa DiscreteModel ? get_grid(Ω) : Ω
     Uh_p1_cache_and_plot = FESpace(model_for_fes_rigging_anim, reffe_p1_anim)
 
-    # Populate solution_cache by interpolating each step
-    println("Caching and interpolating solution steps...")
-    solution_cache = [] # Initialize as an empty array
-    try
-        push!(solution_cache, (interpolate(Az0, Uh_p1_cache_and_plot), 0.0))
-    catch e_interp_az0
-        println("Warning: Could not interpolate Az0 for cache. Error: $e_interp_az0. Using Az0 directly.")
-        push!(solution_cache, (Az0, 0.0)) # Fallback
-    end
-
-    for (step_idx, (sol_step, time_step)) in enumerate(solution_iterable_input)
+    # Cache interpolated solutions for plotting
+    println("Interpolating processed solutions for plotting...")
+    solution_cache = []
+    for (step_idx, (Az_n, B_n, J_eddy_n, tn)) in enumerate(processed_steps)
         try
-            sol_interpolated = interpolate(sol_step, Uh_p1_cache_and_plot)
-            push!(solution_cache, (sol_interpolated, time_step))
-            if step_idx % 50 == 0; println("Cached step $(step_idx) at t=$(time_step)"); end
+            Az_n_interp = interpolate(Az_n, Uh_p1_cache_and_plot)
+            # Note: B_n and J_eddy_n will be recalculated from Az_n_interp to ensure consistency
+            push!(solution_cache, (Az_n_interp, tn))
+            if step_idx % 50 == 0
+                println("Cached processed step $(step_idx) at t=$(tn)")
+            end
         catch e_interp_cache
-            println("Warning: Could not interpolate solution at t=$(time_step) for cache (step $(step_idx)). Error: $e_interp_cache. Skipping this step in cache.")
+            println("Warning: Could not interpolate processed solution at t=$(tn) for cache. Error: $e_interp_cache. Using original.")
+            push!(solution_cache, (Az_n, tn))
         end
     end
-    println("Finished caching $(length(solution_cache)) solution steps.")
+    println("Finished caching $(length(solution_cache)) processed solution steps.")
 
     ylims_az, ylims_b, ylims_jeddy = nothing, nothing, nothing 
     clims_az, clims_b, clims_jeddy = nothing, nothing, nothing 
@@ -433,28 +527,12 @@ function create_transient_animation(
         min_b_vals, max_b_vals = Float64[], Float64[]
         min_jeddy_vals, max_jeddy_vals = Float64[], Float64[]
 
-        # Iterate through the already P1-interpolated cached solutions
+        # Iterate through cached solutions and use processed results for limits calculation
         for (idx_cache, (Az_n_cache, tn_cache)) in enumerate(solution_cache) 
-            B_n_cache = -∇(Az_n_cache) # Az_n_cache is already P1
-            
-            local Az_prev_for_jeddy_calc
-            local t_prev_for_jeddy_calc 
-            local is_initial_step_jeddy_calc
-            local Δt_eff_jeddy_calc 
-
-            if idx_cache == 1 || tn_cache == 0.0
-                is_initial_step_jeddy_calc = true
-                Δt_eff_jeddy_calc = Δt # Nominal Δt
-                Az_prev_for_jeddy_calc = Az_n_cache # J_eddy will be zeroed by helper
-            else
-                Az_prev_tuple_jeddy, t_prev_val_jeddy = solution_cache[idx_cache-1]
-                Az_prev_for_jeddy_calc = Az_prev_tuple_jeddy # This is also a P1 FEFunction from cache
-                t_prev_for_jeddy_calc = t_prev_val_jeddy
-                Δt_eff_jeddy_calc = tn_cache - t_prev_for_jeddy_calc
-                if Δt_eff_jeddy_calc <= 1e-9; Δt_eff_jeddy_calc = Δt; end 
-                is_initial_step_jeddy_calc = false
-            end
-            J_eddy_n_cache = _calculate_transient_jeddy(Az_n_cache, Az_prev_for_jeddy_calc, σ_cf, Δt_eff_jeddy_calc, Ω, is_initial_step_jeddy_calc)
+            # Get corresponding processed results
+            (_, B_n_processed, J_eddy_n_processed, _) = processed_steps[idx_cache]
+            B_n_cache = B_n_processed
+            J_eddy_n_cache = J_eddy_n_processed
 
             for pt in eval_points
                 try push!(min_az_vals, _extract_val(Az_n_cache(pt))); push!(max_az_vals, _extract_val(Az_n_cache(pt))) catch; end
@@ -486,37 +564,12 @@ function create_transient_animation(
         println("Global limits: Az=$ylims_az, B=$ylims_b, Jeddy=$ylims_jeddy")
     end
 
-    # Define a probe point for debugging (adjust if needed for your domain)
-    debug_probe_point = dim == 1 ? Point(-0.03) : Point(0.0, 0.0) 
-    # If you have a specific point known to be in the domain, use that.
-    # For example, from _get_evaluation_points(Ω)[1] if eval_points were calculated.
-
     anim = @animate for (idx, (Az_n_from_cache, tn)) in enumerate(solution_cache) 
-        # Az_n_from_cache is now already an interpolated FEFunction
+        # Az_n_from_cache is already an interpolated FEFunction
         Az_n = Az_n_from_cache 
 
-        B_n = -∇(Az_n) 
-        
-        local Az_prev_sol_cache
-        local t_prev_cache
-        local is_initial_step_anim_loop
-        local Δt_eff_anim_loop
-
-        if idx == 1 || tn == 0.0 
-            is_initial_step_anim_loop = true
-            Δt_eff_anim_loop = Δt # Nominal Δt
-            # For the first step, Az_prev_sol_cache is Az_n itself, J_eddy will be zeroed by _calculate_transient_jeddy
-            Az_prev_sol_cache = Az_n 
-        else
-            # solution_cache stores (interpolated_FEFunction, time)
-            Az_prev_sol_cache_tuple, t_prev_cache_val = solution_cache[idx-1]
-            Az_prev_sol_cache = Az_prev_sol_cache_tuple
-            t_prev_cache = t_prev_cache_val
-            Δt_eff_anim_loop = tn - t_prev_cache
-            if Δt_eff_anim_loop <= 1e-9; Δt_eff_anim_loop = Δt; end # Fallback
-            is_initial_step_anim_loop = false
-        end
-        J_eddy_n = _calculate_transient_jeddy(Az_n, Az_prev_sol_cache, σ_cf, Δt_eff_anim_loop, Ω, is_initial_step_anim_loop)
+        # Get corresponding processed fields from the enhanced post-processing
+        (_, B_n, J_eddy_n, _) = processed_steps[idx]
 
         plot_title_str = Printf.@sprintf("Time: %.4f s", tn)
 
@@ -556,9 +609,9 @@ function create_transient_animation(
         gif_path = output_path * ".gif"
     end
 
+    println("Transient animation saved to: $gif_path")
     try
-        gif(anim, gif_path, fps=fps)
-        println("Transient animation saved to: $gif_path")
+        display(gif(anim, gif_path, fps=fps))
     catch e
         println("Error saving GIF: $e. Make sure Plots.jl backend supports GIF or save individual frames.")
     end
