@@ -3,18 +3,60 @@ module Visualisation
 using Plots
 using Gridap
 using Gridap.MultiField: MultiFieldFEFunction
-using Gridap.CellData: CellField
+using Gridap.CellData: CellField, Operation
 using Gridap.Visualization
 using Gridap.FESpaces: TestFESpace, FEFunction, FESpace
 using Gridap.ReferenceFEs: lagrangian
-using Gridap.Geometry: get_triangulation
+using Gridap.Geometry: get_triangulation, get_node_coordinates, num_cell_dims, get_grid, DiscreteModel
 using Printf
 using LaTeXStrings
 
-export plot_contour_2d, create_field_animation
+# To access PostProcessing.calculate_b_field. This assumes MagnetostaticsFEM.jl correctly includes and uses PostProcessing.
+# This makes Visualisation dependent on PostProcessing being available in its scope.
+# An alternative is to always require B_field to be passed in if Visualisation is to be kept fully independent.
+using ..PostProcessing
+
+# Helper function to extract scalar value from FE evaluations
+_extract_val(v) = isa(v, Gridap.Fields.ForwardDiff.Dual) ? Gridap.Fields.ForwardDiff.value(v) : (isa(v, AbstractArray) && !isempty(v) ? first(v) : v)
+
+export plot_contour_2d, create_field_animation, plot_time_signal, plot_fft_spectrum, plot_line_1d, create_transient_animation
+
+# Helper function to get a representative grid of points for min/max calculation
+function _get_evaluation_points(Ω; num_points_per_dim=30)
+    dim = num_cell_dims(Ω)
+    model_coords = get_node_coordinates(Ω) # Get all node coordinates
+    
+    min_coords = [minimum(getindex.(model_coords, i)) for i in 1:dim]
+    max_coords = [maximum(getindex.(model_coords, i)) for i in 1:dim]
+    
+    if dim == 1
+        return [VectorValue(x) for x in range(min_coords[1], max_coords[1], length=num_points_per_dim)]
+    elseif dim == 2
+        x_range = range(min_coords[1], max_coords[1], length=num_points_per_dim)
+        y_range = range(min_coords[2], max_coords[2], length=num_points_per_dim)
+        points = Vector{Point{dim, Float64}}()
+        for x_val in x_range
+            for y_val in y_range
+                push!(points, Point(x_val, y_val))
+            end
+        end
+        return points
+    else
+        error("Evaluation points for dim $dim not implemented for min/max calculation.")
+    end
+end
+
+# Internal helper function to calculate transient eddy currents
+function _calculate_transient_jeddy(Az_current, Az_previous, σ_cf, efectivo_Δt, Ω_domain, initial_step::Bool=false)
+    if initial_step || efectivo_Δt <= 1e-9 # Handle initial step or very small/zero Δt
+        return CellField(0.0, Ω_domain)
+    else
+        return -σ_cf .* (Az_current .- Az_previous) ./ efectivo_Δt
+    end
+end
 
 """
-    plot_contour_2d(Ω, field_to_plot; title="Contour Plot", nlevels=20, output_path=nothing, size=(600,600))
+    plot_contour_2d(Ω, field_to_plot; title="Contour Plot", nlevels=20, output_path=nothing, size=(600,600), clims=nothing)
 
 Generates a 2D contour plot of a given FEFunction or CellField using Plots.jl.
 Only displays and saves the plot if output_path is specified.
@@ -26,24 +68,27 @@ Only displays and saves the plot if output_path is specified.
 - `nlevels`: Optional number of contour levels.
 - `output_path`: Optional path (including filename, e.g., "output/plot.png") to save the plot.
 - `size`: Optional tuple specifying plot dimensions (width, height).
+- `clims`: Optional tuple specifying color limits for the plot.
 """
-function plot_contour_2d(Ω, field_to_plot; title="Contour Plot", nlevels=20, output_path=nothing, size=(600,600))
-    println("Generating contour plot (this might take a while for large meshes)...")
+function plot_contour_2d(Ω, field_to_plot; title="Contour Plot", nlevels=20, output_path=nothing, size=(600,600), clims=nothing)
+    # println("Generating contour plot (this might take a while for large meshes)...") # Reduced verbosity
 
     field_for_plotting = field_to_plot
     Uh_p1 = nothing # Initialize Uh_p1
 
     # Check if the field needs interpolation (e.g., if it's a CellField from composition)
     # Force interpolation to ensure we have a standard FEFunction on a P1 space
-    println("Attempting interpolation of field to P1 space for plotting...")
+    # println("Attempting interpolation of field to P1 space for plotting...") # Reduced verbosity
     try
         reffe_p1 = ReferenceFE(lagrangian, Float64, 1)
-        Uh_p1 = FESpace(Ω, reffe_p1)
+        # Check if Ω is just a Triangulation or a DiscreteModel
+        model_for_fes_rigging = get_grid(Ω) isa DiscreteModel ? get_grid(Ω) : Ω
+        Uh_p1 = FESpace(model_for_fes_rigging, reffe_p1) # Use model_for_fes_rigging
         field_for_plotting = interpolate(field_to_plot, Uh_p1)
-        println("Interpolation successful.")
+        # println("Interpolation successful.") # Reduced verbosity
     catch e_interp
-        println("Warning: Could not interpolate field onto P1 space. Using original field. Error: $e_interp")
-        field_for_plotting = field_to_plot
+        # println("Warning: Could not interpolate field onto P1 space. Using original field. Error: $e_interp") # Reduced verbosity
+        field_for_plotting = field_to_plot # Fallback to original field
     end
     
     try
@@ -59,19 +104,20 @@ function plot_contour_2d(Ω, field_to_plot; title="Contour Plot", nlevels=20, ou
         y_min, y_max = minimum(y_coords), maximum(y_coords)
         
         # Create a regular grid for evaluation
-        n_grid = 100  # Number of points in each dimension
+        n_grid = 75  # Number of points in each dimension (reduced from 100 for speed)
         x_grid = range(x_min, x_max, length=n_grid)
         y_grid = range(y_min, y_max, length=n_grid)
         
         # Evaluate the field on the grid
         z_values = zeros(n_grid, n_grid)
         
-        for (i, x) in enumerate(x_grid)
-            for (j, y) in enumerate(y_grid)
-                point = VectorValue(x, y)
+        for (i, x_val_loop) in enumerate(x_grid) # Renamed x to x_val_loop to avoid conflict
+            for (j, y_val_loop) in enumerate(y_grid) # Renamed y to y_val_loop to avoid conflict
+                point = VectorValue(x_val_loop, y_val_loop)
                 try
                     # Evaluate field at the point
-                    z_values[j, i] = field_for_plotting(point)
+                    val = field_for_plotting(point)
+                    z_values[j, i] = _extract_val(val)
                 catch e
                     # Point might be outside the mesh
                     z_values[j, i] = NaN
@@ -83,7 +129,8 @@ function plot_contour_2d(Ω, field_to_plot; title="Contour Plot", nlevels=20, ou
         plt = contourf(x_grid, y_grid, z_values, 
                       levels=nlevels, color=:viridis, 
                       title=title, aspect_ratio=:equal, 
-                      size=size)
+                      size=size,
+                      clims=clims) # Added clims
         
         # Only display and save the plot if output_path is specified
         if output_path !== nothing
@@ -102,120 +149,420 @@ function plot_contour_2d(Ω, field_to_plot; title="Contour Plot", nlevels=20, ou
         # Always return the plot object
         return plt
     catch e
-        println("Error generating contour plot: $e")
-        println("If the error persists, consider exporting to VTK and using Paraview.")
+        # println("Error generating contour plot: $e") # Reduced verbosity
+        # println("If the error persists, consider exporting to VTK and using Paraview.") # Reduced verbosity
     end
+    return nothing # Return nothing if error occurs
 end
 
 # Function to extract node coordinates from a triangulation
-function get_node_coordinates(Ω)
-    # Get the underlying grid from the triangulation
-    grid = Ω.grid
+# function get_node_coordinates(Ω) # Now imported from Gridap.Geometry
+#     # Get the underlying grid from the triangulation
+#     grid = Ω.grid
     
-    # Extract node coordinates from the grid
-    # This might need adjustment based on the specific Gridap version and grid type
-    coords = grid.node_coordinates
+#     # Extract node coordinates from the grid
+#     # This might need adjustment based on the specific Gridap version and grid type
+#     coords = grid.node_coordinates
     
-    return coords
-end
+#     return coords
+# end
+
+# function calculate_b_field is not defined in this file. Assuming it's imported or available in scope.
+# If not, it should be passed as an argument or handled appropriately.
+# For create_field_animation, it seems to rely on a global/imported calculate_b_field.
 
 function create_field_animation(
-    Ω, uv, ω, output_path;
-    B_field=nothing,
-    J_eddy=nothing,
+    Ω, uv_complex, ω, output_path; # Renamed uv to uv_complex for clarity
+    B_field_complex=nothing, # Renamed B_field to B_field_complex
+    J_eddy_complex=nothing,  # Renamed J_eddy to J_eddy_complex
     nframes=100,
     fps=15,
-    grid_points=100,
-    plotinfo=Dict()
+    plotinfo=Dict() # Keep for future use
 )
-    println("Creating field animation...")
+    println("Creating harmonic field animation...")
     
     # Extract real and imaginary parts
-    u = uv[1]  # Real part
-    v = uv[2]  # Imaginary part
+    u = uv_complex[1]  # Real part of Az
+    v = uv_complex[2]  # Imaginary part of Az
     
     # Calculate B field if not provided
-    if B_field === nothing
-        println("Calculating B field components...")
-        B_re, B_im = calculate_b_field(uv)
+    if B_field_complex === nothing
+        println("B_field_complex not provided, attempting to calculate using PostProcessing.calculate_b_field...")
+        try
+            B_re_calc, B_im_calc = PostProcessing.calculate_b_field(uv_complex)
+        catch e_bfield
+            println("Warning: Could not calculate B-field using PostProcessing.calculate_b_field. Error: $e_bfield. B-field will not be plotted.")
+            B_re_calc, B_im_calc = nothing, nothing
+        end
     else
-        B_re, B_im = B_field
+        B_re_calc, B_im_calc = B_field_complex
     end
     
-    # Get problem dimension
+    J_eddy_re_calc, J_eddy_im_calc = J_eddy_complex === nothing ? (nothing, nothing) : J_eddy_complex
+
     dim = num_cell_dims(Ω)
     
-    # Create evaluation points
     if dim == 1
-        # 1D animation code (not implemented here)
+        error("1D harmonic animation not implemented yet in this function.")
     else  # 2D case
-        println("Creating 2D animation...")
+        println("Creating 2D harmonic animation...")
         
-        # Calculate time period
         T_period = 2π / ω
         t_vec = range(0, T_period, length=nframes)
         
-        # Precompute field magnitudes for consistent color scales
-        Az_mag = CellField((x) -> sqrt(u(x)^2 + v(x)^2), Ω)
-        B_mag = CellField((x) -> sqrt(inner(B_re(x), B_re(x)) + inner(B_im(x), B_im(x))), Ω)
-        
-        # Create animation
         anim = @animate for t_step in t_vec
-            # Calculate instantaneous values at this time step
             cos_wt = cos(ω * t_step)
             sin_wt = sin(ω * t_step)
             
-            # Create instantaneous fields
-            Az_inst = CellField((x) -> u(x) * cos_wt - v(x) * sin_wt, Ω)
-            B_inst_mag = CellField((x) -> begin
-                B_re_val = B_re(x) * cos_wt - B_im(x) * sin_wt
-                return sqrt(inner(B_re_val, B_re_val))
-            end, Ω)
+            Az_inst = u * cos_wt - v * sin_wt
             
-            # Create eddy current field if provided
-            J_eddy_inst = nothing
-            if J_eddy !== nothing
-                J_eddy_re, J_eddy_im = J_eddy
-                J_eddy_inst = CellField((x) -> J_eddy_re(x) * cos_wt - J_eddy_im(x) * sin_wt, Ω)
+            plots_to_combine = []
+            
+            title_az_str = Printf.@sprintf("A_z (t=%.3fs)", t_step)
+            p1 = plot_contour_2d(Ω, Az_inst, 
+                    title=L"%$title_az_str",
+                    output_path=nothing, 
+                    size=(600,500), clims=get(plotinfo, :Az_clims, nothing))
+            push!(plots_to_combine, p1)
+
+            if B_re_calc !== nothing && B_im_calc !== nothing
+                B_vec_inst = B_re_calc * cos_wt - B_im_calc * sin_wt
+                B_inst_mag = Operation(b -> sqrt(inner(b,b)))(B_vec_inst)
+                title_b_str = Printf.@sprintf("|B| (t=%.3fs)", t_step)
+                p2 = plot_contour_2d(Ω, B_inst_mag, 
+                        title=L"%$title_b_str", 
+                        output_path=nothing, 
+                        size=(600,500), clims=get(plotinfo, :B_clims, nothing))
+                push!(plots_to_combine, p2)
+            end
+                    
+            if J_eddy_re_calc !== nothing && J_eddy_im_calc !== nothing
+                J_eddy_inst = J_eddy_re_calc * cos_wt - J_eddy_im_calc * sin_wt
+                title_jeddy_str = Printf.@sprintf("J_{eddy} (t=%.3fs)", t_step)
+                p3 = plot_contour_2d(Ω, J_eddy_inst, 
+                      title=L"%$title_jeddy_str",
+                      output_path=nothing, 
+                      size=(600,500), clims=get(plotinfo, :Jeddy_clims, nothing))
+                push!(plots_to_combine, p3)
             end
             
-            # Create contour plots
-            p1 = plot_contour_2d(Ω, Az_inst, 
-                    title=@sprintf("Az(t=%.3fs)", t_step),
-                    output_path=nothing, 
-                    size=(600,500))
-            
-            p2 = plot_contour_2d(Ω, B_inst_mag, 
-                    title=@sprintf("|B|(t=%.3fs)", t_step),
-                    output_path=nothing, 
-                    size=(600,500))
-                    
-            if J_eddy_inst !== nothing
-                p3 = plot_contour_2d(Ω, J_eddy_inst, 
-                      title=@sprintf("Jeddy(t=%.3fs)", t_step),
-                      output_path=nothing, 
-                      size=(600,500))
-                # Combine all three plots
-                plot(p1, p2, p3, layout=(3,1), size=(700, 1200), 
-                     title=@sprintf("Time-Harmonic Fields (t=%.3fs)", t_step))
-            else
-                # Just combine Az and B plots
-                plot(p1, p2, layout=(2,1), size=(700, 800),
-                     title=@sprintf("Time-Harmonic Fields (t=%.3fs)", t_step))
+            num_plots = length(plots_to_combine)
+            if num_plots > 0
+                plot(plots_to_combine..., layout=(num_plots,1), size=(700, 400*num_plots), 
+                        plot_title=@sprintf("Time-Harmonic Fields (ω=%.2f rad/s)", ω))
             end
         end
         
-        # Save the animation
         gif_path = output_path
         if !endswith(lowercase(output_path), ".gif")
             gif_path = output_path * ".gif"
         end
         
-        
-        println("2D Animation saved to: $gif_path")
-        
-        return gif(anim, gif_path, fps=fps)
+        try
+            gif(anim, gif_path, fps=fps)
+            println("2D Harmonic Animation saved to: $gif_path")
+        catch e
+            println("Error saving GIF: $e. Make sure Plots.jl backend supports GIF or save individual frames.")
+        end
+        return anim
     end
+    return nothing
+end
+
+"""
+    plot_time_signal(time_vector::AbstractVector, signal_vector::AbstractVector; 
+                     title_str::String="Time Signal", xlabel_str::AbstractString=L"Time (s)", ylabel_str::AbstractString="Amplitude", 
+                     output_path::Union{String,Nothing}=nothing)
+
+Plots a 1D time signal.
+"""
+function plot_time_signal(time_vector::AbstractVector, signal_vector::AbstractVector; 
+                          title_str::String="Time Signal", xlabel_str::AbstractString=L"Time (s)", ylabel_str::AbstractString="Amplitude", 
+                          output_path::Union{String,Nothing}=nothing)
+    plt = plot(time_vector, signal_vector, title=title_str, xlabel=xlabel_str, ylabel=ylabel_str, legend=false)
+    if output_path !== nothing
+        savefig(plt, output_path)
+        println("Time signal plot saved to: $output_path")
+    end
+    display(plt)
+    return plt
+end
+
+"""
+    plot_fft_spectrum(frequencies::AbstractVector, magnitudes::AbstractVector; 
+                        title_str::String="FFT Spectrum", xlabel_str::AbstractString=L"Frequency (Hz)", ylabel_str::AbstractString="Magnitude", 
+                        xlims_val=nothing, output_path::Union{String,Nothing}=nothing)
+
+Plots an FFT spectrum.
+"""
+function plot_fft_spectrum(frequencies::AbstractVector, magnitudes::AbstractVector; 
+                           title_str::String="FFT Spectrum", xlabel_str::AbstractString=L"Frequency (Hz)", ylabel_str::AbstractString="Magnitude", 
+                           xlims_val=nothing, output_path::Union{String,Nothing}=nothing)
+    plt = plot(frequencies, magnitudes, title=title_str, xlabel=xlabel_str, ylabel=ylabel_str, legend=false, seriestype=:stem)
+    if xlims_val !== nothing
+        xlims!(plt, xlims_val)
+    end
+    if output_path !== nothing
+        savefig(plt, output_path)
+        println("FFT spectrum plot saved to: $output_path")
+    end
+    display(plt)
+    return plt
+end
+
+"""
+    plot_line_1d(Ω_1d, field_to_plot; title_str="Line Plot", npoints=100, output_path=nothing, size=(600,400), y_label="Value", ylims=nothing)
+
+Generates a 1D line plot of a given FEFunction or CellField.
+"""
+function plot_line_1d(Ω_1d, field_to_plot; title_str="Line Plot", npoints=100, output_path=nothing, size=(600,400), y_label="Value", ylims=nothing)
+    
+    field_for_plotting = field_to_plot
+    try
+        reffe_p1 = ReferenceFE(lagrangian, Float64, 1)
+        model_for_fes_rigging = get_grid(Ω_1d) isa DiscreteModel ? get_grid(Ω_1d) : Ω_1d
+        Uh_p1 = FESpace(model_for_fes_rigging, reffe_p1)
+        field_for_plotting = interpolate(field_to_plot, Uh_p1)
+    catch e_interp
+    end
+
+    try
+        coords = get_node_coordinates(Ω_1d)
+        x_coords = [point[1] for point in coords]
+        x_min, x_max = minimum(x_coords), maximum(x_coords)
+        
+        x_eval = range(x_min, x_max, length=npoints)
+        y_eval = zeros(npoints)
+
+        for (i, x_val) in enumerate(x_eval)
+            point_1d = VectorValue(x_val) 
+            try
+                val = field_for_plotting(point_1d)
+                y_eval[i] = _extract_val(val)
+            catch e_eval
+                y_eval[i] = NaN 
+            end
+        end
+        
+        plt = plot(x_eval, y_eval, title=title_str, xlabel=L"x \mathrm{(m)}", ylabel=y_label, size=size, legend=false, ylims=ylims)
+        
+        if output_path !== nothing
+            display(plt)
+            try
+                savefig(plt, output_path)
+                println("1D Line plot saved to $output_path")
+            catch e_save
+                println("Error saving 1D line plot to '$output_path': $e_save")
+            end
+        end
+        return plt
+    catch e
+        return nothing
+    end
+end
+
+"""
+    create_transient_animation(
+        Ω,
+        solution_iterable_input, 
+        σ_cf::Union{CellField, Function, Number},
+        Δt::Float64, 
+        Az0::FEFunction,
+        output_path::String;
+        fps::Int=10,
+        npoints_1d::Int=100, 
+        nlevels_2d::Int=15,  
+        consistent_axes::Bool=true,
+        num_eval_points_minmax::Int=20 
+    )
+
+Creates a GIF animation of the transient simulation results.
+Includes Az, B, and J_eddy.
+"""
+function create_transient_animation(
+    Ω,
+    solution_iterable_input, 
+    σ_cf::Union{CellField, Function, Number}, 
+    Δt::Float64, 
+    Az0::FEFunction,
+    output_path::String;
+    fps::Int=10,
+    npoints_1d::Int=100,
+    nlevels_2d::Int=15,
+    consistent_axes::Bool=true,
+    num_eval_points_minmax::Int=20
+)
+    println("Creating transient field animation with J_eddy...")
+    
+    dim = num_cell_dims(Ω)
+
+    # Prepare for P1 interpolation, used for caching and plotting if direct plotting fails
+    reffe_p1_anim = ReferenceFE(lagrangian, Float64, 1)
+    model_for_fes_rigging_anim = get_grid(Ω) isa DiscreteModel ? get_grid(Ω) : Ω
+    Uh_p1_cache_and_plot = FESpace(model_for_fes_rigging_anim, reffe_p1_anim)
+
+    # Populate solution_cache by interpolating each step
+    println("Caching and interpolating solution steps...")
+    solution_cache = [] # Initialize as an empty array
+    try
+        push!(solution_cache, (interpolate(Az0, Uh_p1_cache_and_plot), 0.0))
+    catch e_interp_az0
+        println("Warning: Could not interpolate Az0 for cache. Error: $e_interp_az0. Using Az0 directly.")
+        push!(solution_cache, (Az0, 0.0)) # Fallback
+    end
+
+    for (step_idx, (sol_step, time_step)) in enumerate(solution_iterable_input)
+        try
+            sol_interpolated = interpolate(sol_step, Uh_p1_cache_and_plot)
+            push!(solution_cache, (sol_interpolated, time_step))
+            if step_idx % 50 == 0; println("Cached step $(step_idx) at t=$(time_step)"); end
+        catch e_interp_cache
+            println("Warning: Could not interpolate solution at t=$(time_step) for cache (step $(step_idx)). Error: $e_interp_cache. Skipping this step in cache.")
+        end
+    end
+    println("Finished caching $(length(solution_cache)) solution steps.")
+
+    ylims_az, ylims_b, ylims_jeddy = nothing, nothing, nothing 
+    clims_az, clims_b, clims_jeddy = nothing, nothing, nothing 
+
+    if consistent_axes && !isempty(solution_cache)
+        println("Calculating global min/max for consistent axes (using cached P1 solutions)...")
+        eval_points = _get_evaluation_points(Ω, num_points_per_dim=num_eval_points_minmax)
+
+        min_az_vals, max_az_vals = Float64[], Float64[]
+        min_b_vals, max_b_vals = Float64[], Float64[]
+        min_jeddy_vals, max_jeddy_vals = Float64[], Float64[]
+
+        # Iterate through the already P1-interpolated cached solutions
+        for (idx_cache, (Az_n_cache, tn_cache)) in enumerate(solution_cache) 
+            B_n_cache = -∇(Az_n_cache) # Az_n_cache is already P1
+            
+            local Az_prev_for_jeddy_calc
+            local t_prev_for_jeddy_calc 
+            local is_initial_step_jeddy_calc
+            local Δt_eff_jeddy_calc 
+
+            if idx_cache == 1 || tn_cache == 0.0
+                is_initial_step_jeddy_calc = true
+                Δt_eff_jeddy_calc = Δt # Nominal Δt
+                Az_prev_for_jeddy_calc = Az_n_cache # J_eddy will be zeroed by helper
+            else
+                Az_prev_tuple_jeddy, t_prev_val_jeddy = solution_cache[idx_cache-1]
+                Az_prev_for_jeddy_calc = Az_prev_tuple_jeddy # This is also a P1 FEFunction from cache
+                t_prev_for_jeddy_calc = t_prev_val_jeddy
+                Δt_eff_jeddy_calc = tn_cache - t_prev_for_jeddy_calc
+                if Δt_eff_jeddy_calc <= 1e-9; Δt_eff_jeddy_calc = Δt; end 
+                is_initial_step_jeddy_calc = false
+            end
+            J_eddy_n_cache = _calculate_transient_jeddy(Az_n_cache, Az_prev_for_jeddy_calc, σ_cf, Δt_eff_jeddy_calc, Ω, is_initial_step_jeddy_calc)
+
+            for pt in eval_points
+                try push!(min_az_vals, _extract_val(Az_n_cache(pt))); push!(max_az_vals, _extract_val(Az_n_cache(pt))) catch; end
+                if dim == 1
+                    # For Bx, B_n_cache is a vector, extract component
+                    try 
+                        b_val_pt = B_n_cache(pt)
+                        if isa(b_val_pt, VectorValue) && length(b_val_pt) > 0
+                            push!(min_b_vals, _extract_val(b_val_pt[1]))
+                            push!(max_b_vals, _extract_val(b_val_pt[1]))
+                        end
+                    catch; end
+                else # dim == 2, |B|
+                    try 
+                        b_val_pt = B_n_cache(pt)
+                        if isa(b_val_pt, VectorValue) # Ensure it's a VectorValue before inner product
+                             push!(min_b_vals, _extract_val(sqrt(inner(b_val_pt,b_val_pt))))
+                             push!(max_b_vals, _extract_val(sqrt(inner(b_val_pt,b_val_pt))))
+                        end
+                    catch; end
+                end
+                try push!(min_jeddy_vals, _extract_val(J_eddy_n_cache(pt))); push!(max_jeddy_vals, _extract_val(J_eddy_n_cache(pt))) catch; end
+            end
+        end
+
+        if !isempty(min_az_vals) && !isempty(max_az_vals) ylims_az = (minimum(min_az_vals), maximum(max_az_vals)); clims_az = ylims_az; else ylims_az=nothing; clims_az=nothing; end
+        if !isempty(min_b_vals) && !isempty(max_b_vals) ylims_b = (minimum(min_b_vals), maximum(max_b_vals)); clims_b = ylims_b; else ylims_b=nothing; clims_b=nothing; end
+        if !isempty(min_jeddy_vals) && !isempty(max_jeddy_vals) ylims_jeddy = (minimum(min_jeddy_vals), maximum(max_jeddy_vals)); clims_jeddy = ylims_jeddy; else ylims_jeddy=nothing; clims_jeddy=nothing; end
+        println("Global limits: Az=$ylims_az, B=$ylims_b, Jeddy=$ylims_jeddy")
+    end
+
+    # Define a probe point for debugging (adjust if needed for your domain)
+    debug_probe_point = dim == 1 ? Point(-0.03) : Point(0.0, 0.0) 
+    # If you have a specific point known to be in the domain, use that.
+    # For example, from _get_evaluation_points(Ω)[1] if eval_points were calculated.
+
+    anim = @animate for (idx, (Az_n_from_cache, tn)) in enumerate(solution_cache) 
+        # Az_n_from_cache is now already an interpolated FEFunction
+        Az_n = Az_n_from_cache 
+
+        B_n = -∇(Az_n) 
+        
+        local Az_prev_sol_cache
+        local t_prev_cache
+        local is_initial_step_anim_loop
+        local Δt_eff_anim_loop
+
+        if idx == 1 || tn == 0.0 
+            is_initial_step_anim_loop = true
+            Δt_eff_anim_loop = Δt # Nominal Δt
+            # For the first step, Az_prev_sol_cache is Az_n itself, J_eddy will be zeroed by _calculate_transient_jeddy
+            Az_prev_sol_cache = Az_n 
+        else
+            # solution_cache stores (interpolated_FEFunction, time)
+            Az_prev_sol_cache_tuple, t_prev_cache_val = solution_cache[idx-1]
+            Az_prev_sol_cache = Az_prev_sol_cache_tuple
+            t_prev_cache = t_prev_cache_val
+            Δt_eff_anim_loop = tn - t_prev_cache
+            if Δt_eff_anim_loop <= 1e-9; Δt_eff_anim_loop = Δt; end # Fallback
+            is_initial_step_anim_loop = false
+        end
+        J_eddy_n = _calculate_transient_jeddy(Az_n, Az_prev_sol_cache, σ_cf, Δt_eff_anim_loop, Ω, is_initial_step_anim_loop)
+
+        plot_title_str = Printf.@sprintf("Time: %.4f s", tn)
+
+        if dim == 1
+            Bx_n_field = Operation(b_vec -> b_vec[1])(B_n)
+            title_az_1d = L"A_z(x,t)"
+            title_bx_1d = L"B_x(x,t)"
+            title_jeddy_1d = L"J_{eddy}(x,t)"
+
+            # Restore calls to plot_line_1d, Az_n is already P1 interpolated from cache
+            p1 = plot_line_1d(Ω, Az_n, title_str=title_az_1d, npoints=npoints_1d, y_label=L"A_z \mathrm{(Wb/m)}", output_path=nothing, ylims=ylims_az) 
+            p2 = plot_line_1d(Ω, Bx_n_field, title_str=title_bx_1d, npoints=npoints_1d, y_label=L"B_x \mathrm{(T)}", output_path=nothing, ylims=ylims_b)
+            p3 = plot_line_1d(Ω, J_eddy_n, title_str=title_jeddy_1d, npoints=npoints_1d, y_label=L"J_{eddy} \mathrm{(A/m^2)}", output_path=nothing, ylims=ylims_jeddy)
+            
+            plot(p1, p2, p3, layout=(3,1), plot_title=plot_title_str, size=(700,1000))
+
+        elseif dim == 2
+            B_mag_n = Operation(b_vec -> sqrt(inner(b_vec, b_vec)))(B_n)
+            
+            title_az_2d_str = Printf.@sprintf("A_z (Wb/m) (t=%.3fs)", tn)
+            title_b_2d_str = Printf.@sprintf("|B| (T) (t=%.3fs)", tn)
+            title_jeddy_2d_str = Printf.@sprintf("J_{eddy} (A/m^2) (t=%.3fs)", tn)
+
+            # Az_n is already P1 interpolated from cache
+            p1 = plot_contour_2d(Ω, Az_n, title=L"%$title_az_2d_str", nlevels=nlevels_2d, output_path=nothing, clims=clims_az)
+            p2 = plot_contour_2d(Ω, B_mag_n, title=L"%$title_b_2d_str", nlevels=nlevels_2d, output_path=nothing, clims=clims_b)
+            p3 = plot_contour_2d(Ω, J_eddy_n, title=L"%$title_jeddy_2d_str", nlevels=nlevels_2d, output_path=nothing, clims=clims_jeddy)
+            
+            plot(p1, p2, p3, layout=(3,1), plot_title=plot_title_str, size=(700,1200))
+        else
+            error("Animation for dimension $dim not implemented.")
+        end
+    end
+
+    gif_path = output_path
+    if !endswith(lowercase(output_path), ".gif")
+        gif_path = output_path * ".gif"
+    end
+
+    try
+        gif(anim, gif_path, fps=fps)
+        println("Transient animation saved to: $gif_path")
+    catch e
+        println("Error saving GIF: $e. Make sure Plots.jl backend supports GIF or save individual frames.")
+    end
+    return anim
 end
 
 end # module Visualisation

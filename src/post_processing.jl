@@ -1,7 +1,14 @@
+module PostProcessing
+
 using Gridap
-using WriteVTK # Still needed for single file saving
+using Printf
+using WriteVTK # Still needed for single file saving (though not directly by new func)
 using Gridap.MultiField: MultiFieldFEFunction
 using Gridap.Visualization: createpvd, createvtk, vtk_save, VTKCellData # Ensure createvtk is imported
+using Gridap.FESpaces: FEFunction # Added for type hint
+
+export calculate_b_field, save_results_vtk, calculate_eddy_current # Existing exports
+export save_pvd_and_extract_signal, save_transient_pvd # New export
 
 """
     calculate_b_field(Az) -> B
@@ -36,6 +43,37 @@ function calculate_b_field(Az::Vector{ComplexF64})
     # Raise not implemented error for now
     error("calculate_b_field for Vector{ComplexF64} is not implemented yet.")
 end
+
+function save_results_vtk(Ω::Triangulation, output_file_base::String, fields_dict::Dict{String, Any}; append::Bool=false)
+    # Ensure the output directory exists
+    output_dir = dirname(output_file_base)
+    if !isdir(output_dir)
+        mkpath(output_dir)
+    end
+
+    base_name = first(splitext(output_file_base))
+    full_output_path = base_name * ".vtk"
+    
+    try
+        Gridap.writevtk(Ω, full_output_path; cellfields=fields_dict)
+        println("Successfully saved results to $(full_output_path)")
+    catch e
+        println("Error saving single VTK file: $(e)")
+        println("Attempting to save components individually...")
+        # Fallback: Save each component to a separate file if the combined save fails
+        for (name, field) in fields_dict
+            individual_output_path = base_name * "_" * name * ".vtk"
+            try
+                # Removing explicit append here as well.
+                Gridap.writevtk(Ω, individual_output_path; cellfields=Dict(name => field))
+                println("Successfully saved $(name) to $(individual_output_path)")
+            catch individual_e
+                println("Failed to save component $(name). Error: $(individual_e)")
+            end
+        end
+    end
+end
+
 
 """
     save_results_vtk(Ω, filenamebase, fields::Dict; save_time_series::Bool=false, ω::Union{Float64, Nothing}=nothing, nframes::Int=20)
@@ -205,3 +243,116 @@ function calculate_eddy_current(uv::MultiFieldFEFunction, conductivity_func, ome
     J_eddy_im = (omega * σ) * u
     return J_eddy_re, J_eddy_im
 end
+
+"""
+    save_pvd_and_extract_signal(
+        solution_iterable, 
+        Az0::FEFunction, 
+        Ω::Triangulation, 
+        pvd_filename_base::String, 
+        t0::Float64, 
+        x_probe::Union{Point, VectorValue}, 
+        steps_for_fft_start_time::Float64,
+        freq::Float64,
+        num_periods_collect_fft::Real # Can be Int or Float
+    ) -> Tuple{Vector{Float64}, Vector{Float64}}
+
+Saves transient solution snapshots to a PVD file and extracts the time signal of Az at a probe point.
+This function is adapted from the post-processing block in `examples/transient_1d.jl`.
+"""
+function save_pvd_and_extract_signal(
+    solution_iterable, 
+    Az0::FEFunction, 
+    Ω::Triangulation, 
+    pvd_filename_base::String, 
+    t0::Float64, 
+    x_probe::Union{Point, VectorValue}, 
+    steps_for_fft_start_time::Float64,
+)
+    time_signal_data = Float64[]
+    time_steps_for_fft = Float64[]
+
+    println("Extracting solution at probe point $(x_probe) and saving PVD to $(pvd_filename_base).pvd...")
+    
+    # Ensure Gridap.Visualization is accessible for createpvd/createvtk
+    createpvd(pvd_filename_base) do pvd_file
+        # Save initial condition
+        try
+            # Using a slightly more robust naming for snapshot files
+            pvd_file[t0] = createvtk(Ω, pvd_filename_base * "_t_initial_snapshot", cellfields=Dict("Az" => Az0))
+            println("Saved initial condition to PVD.")
+        catch e_pvd_init
+            println("Error saving initial condition to PVD: $e_pvd_init")
+        end
+
+        for (i, (Az_n, tn)) in enumerate(solution_iterable)
+            try
+                # Ensure filename compatibility for createvtk, avoid issues with '.' from Printf
+                tn_str_for_file = replace(Printf.@sprintf("%.4f", tn), "." => "p")
+                pvd_file[tn] = createvtk(Ω, pvd_filename_base * "_t_$(tn_str_for_file)_snapshot", cellfields=Dict("Az" => Az_n))
+            catch e_pvd_step
+                println("Error saving step t=$tn to PVD: $e_pvd_step")
+            end
+            
+            if tn >= steps_for_fft_start_time
+                push!(time_steps_for_fft, tn)
+                try
+                    probe_val = Az_n(x_probe)
+                    # Ensure probe_val is scalar Float64 if Az_n(x_probe) returns a single-element array or similar
+                    if isa(probe_val, AbstractArray) && length(probe_val) == 1
+                        push!(time_signal_data, first(probe_val))
+                    elseif isa(probe_val, Number)
+                        push!(time_signal_data, Float64(probe_val))
+                    else
+                        println("Warning: Probe value at t=$(tn) is not a scalar Number or single-element array. Type: $(typeof(probe_val)). Storing NaN.")
+                        push!(time_signal_data, NaN)
+                    end
+                catch e_probe
+                    println("Warning: Could not evaluate Az_n at probe point $(x_probe) for t=$(tn). Error: $e_probe. Storing NaN.")
+                    push!(time_signal_data, NaN)
+                end
+            end
+
+            if i % 20 == 0 
+                println("Processed PVD save for t=$(@sprintf("%.4f", tn))")
+            end
+        end
+    end
+    println("Finished PVD saving to $(pvd_filename_base).pvd")
+    
+    return time_steps_for_fft, time_signal_data
+end
+
+"""
+    save_transient_pvd(Ω_static::Triangulation, uh_solution_iterable, pvd_filename_base::String; uh0::Union{FEFunction, Nothing}=nothing)
+
+Saves transient simulation results to a PVD file collection.
+Iterates through the `uh_solution_iterable` (typically from `solve(odesolver, ...)`).
+`uh0` is the optional initial condition FEFunction to save as time step 0.
+"""
+function save_transient_pvd(Ω_static::Triangulation, uh_solution_iterable, pvd_filename_base::String; uh0::Union{FEFunction, Nothing}=nothing)
+    output_dir = dirname(pvd_filename_base)
+    if output_dir != "" && !isdir(output_dir)
+        mkpath(output_dir)
+    end
+    base_name_no_ext = first(splitext(pvd_filename_base))
+
+    println("Saving transient results to PVD collection: $(base_name_no_ext).pvd")
+    
+    createpvd(base_name_no_ext) do pvd
+        if uh0 !== nothing
+            vtk_file_t0 = joinpath(output_dir, "$(first(splitext(basename(base_name_no_ext))))_t0")
+            pvd[0.0] = createvtk(Ω_static, vtk_file_t0, cellfields=Dict("Az" => uh0))
+            println("Saved initial condition to $(vtk_file_t0).vtu")
+        end
+        
+        for (i, (uh_n, t_n)) in enumerate(uh_solution_iterable)
+            vtk_file_tn = joinpath(output_dir, "$(first(splitext(basename(base_name_no_ext))))_t$(@sprintf("%.4f", t_n))")
+            pvd[t_n] = createvtk(Ω_static, vtk_file_tn, cellfields=Dict("Az" => uh_n))
+            println("Saved frame for t=$(@sprintf("%.4f", t_n)) to $(vtk_file_tn).vtu")
+        end
+    end
+    println("PVD collection saved.")
+end
+
+end # module PostProcessing
