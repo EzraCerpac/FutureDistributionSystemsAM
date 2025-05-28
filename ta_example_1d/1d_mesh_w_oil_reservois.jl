@@ -76,7 +76,7 @@ gmsh.model.addPhysicalGroup(1, [4], 3)          # Coil left
 gmsh.model.addPhysicalGroup(1, [6], 4)          # Coil right
 gmsh.model.addPhysicalGroup(1, [2, 8], 5)       # Oil
 
-gmsh.model.addPhysicalGroup(0, [1, 9], 6)       # Dirichlet boundary condition at x0 and x1
+gmsh.model.addPhysicalGroup(0, [1, 2], 6)       # Dirichlet boundary condition at x0 and x1
 
 gmsh.model.setPhysicalName(1, 1, "Air")
 gmsh.model.setPhysicalName(1, 2, "Core")
