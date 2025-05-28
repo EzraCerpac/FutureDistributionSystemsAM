@@ -6,19 +6,13 @@ paths = get_project_paths("examples") # For OUT_DIR, GEO_DIR etc.
 GEO_DIR = paths["GEO_DIR"]
 OUT_DIR = paths["OUT_DIR"] # Ensure OUT_DIR is defined here
 include("../src/MagnetostaticsFEM.jl")
-# include("../src/transient_solver.jl") # Already in MagnetostaticsFEM
-# include("../src/post_processing.jl") # Already in MagnetostaticsFEM
-# include("../src/visualisation.jl")   # Already in MagnetostaticsFEM
 
 using LinearAlgebra
 using Plots
 using LaTeXStrings
 using Gridap
 using .MagnetostaticsFEM # This brings all exported functions into scope
-# using .TransientSolver    # Now part of MagnetostaticsFEM
-# using .PostProcessing     # Now part of MagnetostaticsFEM
 using Printf # For animation title formatting
-# using .Visualisation # Now part of MagnetostaticsFEM
 
 println("--- Starting Transient 1D Magnetodynamics Example ---")
 
@@ -76,6 +70,7 @@ solution_transient_iterable, Az0_out, Ω_out, ν_cf_out, σ_cf_out, Js_t_func_ou
     )
 
 # %% Post-processing:
+
 x_probe = VectorValue(-0.03) 
 steps_for_fft_start_time = tF - (num_periods_collect_fft / freq)
 
@@ -89,6 +84,8 @@ time_steps_for_fft, time_signal_data = MagnetostaticsFEM.save_pvd_and_extract_si
     t0,
     x_probe,
     steps_for_fft_start_time,
+    σ_cf_out, # Pass conductivity CellField for enhanced J_eddy calculation
+    Δt_val    # Pass time step for enhanced calculations
 )
 
 # %% Process extracted signal (same as before)
@@ -144,9 +141,9 @@ println("can be compared with the magnitude of Az from a frequency-domain soluti
 
 println("\n--- Transient 1D example finished successfully! ---")
 
-# %% Generate Animation
-println("\nGenerating transient animation...")
-transient_animation_path = joinpath(OUT_DIR, "transient_1d_animation.gif")
+# %% Generate Enhanced Animation with B-field and J_eddy
+println("\nGenerating enhanced transient animation with B-field and J_eddy...")
+transient_animation_path = joinpath(OUT_DIR, "transient_1d_enhanced_animation.gif")
 MagnetostaticsFEM.create_transient_animation(
     Ω_out, 
     solution_transient_iterable, 
@@ -157,6 +154,15 @@ MagnetostaticsFEM.create_transient_animation(
     fps=10,
     consistent_axes=true # Optional: use consistent axes
 )
-println("Animation generation process initiated. Check console for progress/completion.")
+println("Enhanced animation generation process initiated. This will include Az, B-field, and J_eddy calculations.")
+
+# %% Additional Post-Processing Demonstration
+println("\nDemonstrating enhanced post-processing capabilities...")
+println("The VTK files now include:")
+println("  - Az: Vector potential")
+println("  - Bx: x-component of magnetic field") 
+println("  - B_magnitude: Magnitude of magnetic field")
+println("  - J_eddy: Eddy current density")
+println("\nLoad the .pvd file in Paraview to visualize all fields simultaneously.")
 
 # %% End of script
