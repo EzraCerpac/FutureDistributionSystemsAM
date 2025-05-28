@@ -45,25 +45,23 @@ function calculate_b_field(Az::Vector{ComplexF64})
     error("calculate_b_field for Vector{ComplexF64} is not implemented yet.")
 end
 
-function save_results_vtk(Ω::Triangulation, output_file_base::String, fields_dict::Dict{String, Any}; append::Bool=false)
+function save_results_vtk(Ω::Triangulation, output_dir::String, fields_dict::Dict{String, Any}; append::Bool=false)
     # Ensure the output directory exists
-    output_dir = dirname(output_file_base)
     if !isdir(output_dir)
         mkpath(output_dir)
     end
 
-    base_name = first(splitext(output_file_base))
-    full_output_path = base_name * ".vtk"
-    
+    base_name = "solution"
+
     try
-        Gridap.writevtk(Ω, full_output_path; cellfields=fields_dict)
-        println("Successfully saved results to $(full_output_path)")
+        Gridap.writevtk(Ω, joinpath(output_dir, base_name); cellfields=fields_dict)
+        println("Successfully saved results to $(output_dir)")
     catch e
         println("Error saving single VTK file: $(e)")
         println("Attempting to save components individually...")
         # Fallback: Save each component to a separate file if the combined save fails
         for (name, field) in fields_dict
-            individual_output_path = base_name * "_" * name * ".vtk"
+            individual_output_path = joinpath(output_dir, base_name * "_" * name * ".vtk")
             try
                 # Removing explicit append here as well.
                 Gridap.writevtk(Ω, individual_output_path; cellfields=Dict(name => field))
@@ -84,7 +82,13 @@ Saves FE results to a VTK file or a PVD time series.
 If `save_time_series` is false (default): Saves components of MultiFieldFEFunction (e.g., `_re`, `_im`) or scalar fields to a single VTK file using `WriteVTK.writevtk`.
 If `save_time_series` is true: Saves instantaneous values over one period (2π/ω) to a PVD collection referencing multiple VTK files using `Gridap.Visualization.createpvd` and `createvtk`. Requires `ω` to be provided.
 """
-function save_results_vtk(Ω, filenamebase, fields::Dict; save_time_series::Bool=false, ω::Union{Float64, Nothing}=nothing, nframes::Int=20)
+function save_results_vtk(Ω, output_dir, fields::Dict; save_time_series::Bool=false, ω::Union{Float64, Nothing}=nothing, nframes::Int=20)
+    if !isdir(output_dir)
+        mkpath(output_dir)
+    end
+
+    base_name = "solution"
+
 
     if save_time_series
         if ω === nothing
@@ -99,7 +103,7 @@ function save_results_vtk(Ω, filenamebase, fields::Dict; save_time_series::Bool
         t_vec = range(0, T_period, length=nframes)
 
         # Use createpvd with a do-block
-        createpvd(filenamebase) do pvd
+        createpvd(joinpath(output_dir, base_name)) do pvd
             for (i, t_step) in enumerate(t_vec)
                 cos_wt = cos(ω * t_step)
                 sin_wt = sin(ω * t_step)
@@ -158,7 +162,7 @@ function save_results_vtk(Ω, filenamebase, fields::Dict; save_time_series::Bool
                 # --- End of logic for calculating vtk_fields_inst ---
 
                 # Generate filename for this time step's VTU file
-                filename_t = filenamebase * "_t$(lpad(i, 4, '0'))"
+                filename_t = joinpath(output_dir, base_name * "_t$(lpad(i, 4, '0'))")
 
                 try
                     # Use createvtk to generate the VTKFile object and add it to the PVD
@@ -173,7 +177,7 @@ function save_results_vtk(Ω, filenamebase, fields::Dict; save_time_series::Bool
             end
         end # End of createpvd block (automatically saves the PVD file)
 
-        println("Time series PVD collection saved to $filenamebase.pvd")
+        println("Time series PVD collection saved to $(joinpath(output_dir, base_name)).pvd")
         return # Exit after saving time series
 
     else
@@ -201,15 +205,15 @@ function save_results_vtk(Ω, filenamebase, fields::Dict; save_time_series::Bool
 
         try
             # Use WriteVTK.writevtk for the single file case
-            WriteVTK.writevtk(Ω, filenamebase, cellfields=vtk_fields, order=2)
-            println("Results saved to $filenamebase.vtu")
+            writevtk(Ω, joinpath(output_dir, base_name), cellfields=vtk_fields, order=2)
+            println("Results saved to $(joinpath(output_dir, base_name)).vtu")
         catch e
             println("Error saving single VTK file: $e")
             println("Attempting to save components individually...")
             for (name, field) in vtk_fields
                  try
-                     WriteVTK.writevtk(Ω, filenamebase * "_$name", cellfields=Dict(name => field), order=2)
-                     println("Saved component $name separately to $(filenamebase)_$name.vtu")
+                     writevtk(Ω, joinpath(output_dir, base_name * "_$name"), cellfields=Dict(name => field), order=2)
+                     println("Saved component $name separately to $(joinpath(output_dir, base_name * "_$name")).vtu")
                  catch e_comp
                      println("Failed to save component $name. Error: $e_comp")
                  end

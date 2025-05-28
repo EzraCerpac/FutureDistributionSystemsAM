@@ -29,6 +29,9 @@ xc2 = c_len/2; xb2 = b_len/2; xa2 = a_len/2
 boundaries = [xa1, xb1, xc1, xc2, xb2, xa2]
 x_int = collect(range(-0.1, 0.1, length=1000))
 coord = [VectorValue(x_) for x_ in x_int]
+x_min_plot = minimum(x_int); x_max_plot = maximum(x_int)
+midpoints = [(x_min_plot + xa1)/2, (xa1 + xb1)/2, (xb1 + xc1)/2, (xc1 + xc2)/2, (xc2 + xb2)/2, (xb2 + xa2)/2, (xa2 + x_max_plot)/2]
+region_labels = ["Air", "Core", "Coil L", "Core", "Coil R", "Core", "Air"]
 
 function plot_harmonic_magnitude_1d(Az_mag, B_mag, Jeddy_mag, ν_field; output_path=nothing)
     # Evaluate magnitudes at interpolation points
@@ -37,11 +40,6 @@ function plot_harmonic_magnitude_1d(Az_mag, B_mag, Jeddy_mag, ν_field; output_p
     Jeddy_mag_vals = Jeddy_mag(coord)
     ν_vals = ν_field(coord) # Evaluate the reluctivity field
     μ_vals = 1 ./ ν_vals # Convert reluctivity to permeability
-
-    # Calculate midpoints for region labels
-    x_min_plot = minimum(x_int); x_max_plot = maximum(x_int)
-    midpoints = [(x_min_plot + xa1)/2, (xa1 + xb1)/2, (xb1 + xc1)/2, (xc1 + xc2)/2, (xc2 + xb2)/2, (xb2 + xa2)/2, (xa2 + x_max_plot)/2]
-    region_labels = ["Air", "Core", "Coil L", "Core", "Coil R", "Core", "Air"]
 
     # Plot Magnitudes
     p1 = plot(x_int * 1e2, Az_mag_vals * 1e5, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"|A_z(x)|\ \mathrm{[mWb/cm]}", color=:black, lw=1, legend=false, title=L"|A_z|" *" Magnitude")
@@ -58,25 +56,30 @@ function plot_harmonic_magnitude_1d(Az_mag, B_mag, Jeddy_mag, ν_field; output_p
     end
 
     plt_mag = plot(p1, p2, p3, p4, layout=(4,1), size=(800, 1200))
-    savefig(plt_mag, output_path)
+    savefig(plt_mag, joinpath(output_path, "harmonic_magnitude_1d.pdf"))
     display(plt_mag)
     return plt_mag
 end
 
-function plot_harmonic_animation_1d(solution_harmonic::MultiFieldFEFunction, Ω::Triangulation, ω::Float64; output_path=nothing, fps=15)
+function plot_harmonic_animation_1d(A_re::FEFunction, A_im::FEFunction, Az_mag, B_re, B_im, B_mag, J_eddy_re, J_eddy_im, J_eddy_mag, ν_field, ω::Float64; output_path=nothing, fps=15)
     freq = ω / (2 * pi)
     T_period = 1/freq
     t_vec = range(0, T_period, length=100)
 
-    u = solution_harmonic[1]
-    v = solution_harmonic[2]
+    ν_vals = ν_field(coord) # Evaluate the reluctivity field
+    μ_vals = 1 ./ ν_vals # Convert reluctivity to permeability
+
+    # Get magnitude limits for consistent y-axis scaling
+    Az_max = maximum(Az_mag(coord))
+    By_max = maximum(B_mag(coord))
+    J_eddy_max = maximum(J_eddy_mag(coord))
 
     anim = @animate for t_step in t_vec
         # Calculate instantaneous real value: Re( (u+iv) * exp(jωt) ) = u*cos(ωt) - v*sin(ωt)
         cos_wt = cos(ω * t_step)
         sin_wt = sin(ω * t_step)
         
-        Az_inst = u * cos_wt - v * sin_wt
+        Az_inst = A_re * cos_wt - A_im * sin_wt
         B_re_inst = B_re * cos_wt - B_im * sin_wt # Instantaneous B_re
         Jeddy_inst = J_eddy_re * cos_wt - J_eddy_im * sin_wt
         
@@ -85,16 +88,11 @@ function plot_harmonic_animation_1d(solution_harmonic::MultiFieldFEFunction, Ω:
         B_re_inst_vals = B_re_inst(coord)
         By_inst_vals = [b[1] for b in B_re_inst_vals] # Extract y-component
         Jeddy_inst_vals = Jeddy_inst(coord)
-        
-        # Get magnitude limits for consistent y-axis scaling
-        Az_max = maximum(Az_mag_vals)
-        By_max = maximum(B_mag_vals)
-        Jeddy_max = maximum(Jeddy_mag_vals)
 
         # Plot instantaneous real parts at time t
         p1_t = plot(x_int * 1e2, Az_inst_vals * 1e5, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"A_z(x,t)\ \mathrm{[mWb/cm]}", color=:blue, lw=1, legend=false, title=@sprintf("Time-Harmonic (t = %.2e s)", t_step), ylims=(-Az_max*1.1e5, Az_max*1.1e5))
         p2_t = plot(x_int * 1e2, By_inst_vals * 1e3, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"B_y(x,t)\ \mathrm{[mT]}", color=:blue, lw=1, legend=false, ylims=(-By_max*1.1e3, By_max*1.1e3))
-        p3_t = plot(x_int * 1e2, Jeddy_inst_vals * 1e-4, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"J_{eddy}(x,t)\ \mathrm{[A/cm^2]}", color=:red, lw=1, legend=false, ylims=(-Jeddy_max*1.1e-4, Jeddy_max*1.1e-4))
+        p3_t = plot(x_int * 1e2, Jeddy_inst_vals * 1e-4, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"J_{eddy}(x,t)\ \mathrm{[A/cm^2]}", color=:red, lw=1, legend=false, ylims=(-J_eddy_max*1.1e-4, J_eddy_max*1.1e-4))
         p4_t = plot(x_int * 1e2, μ_vals, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"\mu(x)\ \mathrm{[m/H]}", color=:black, lw=1, legend=false, title="Permeability (Linear)")
 
         # Add annotations
@@ -108,7 +106,7 @@ function plot_harmonic_animation_1d(solution_harmonic::MultiFieldFEFunction, Ω:
         plot(p1_t, p2_t, p3_t, p4_t, layout=(4,1), size=(800, 1200))
     end
 
-    movie = gif(anim, output_path, fps = fps)
+    movie = gif(anim, joinpath(output_path, "harmonic_animation_1d.gif"), fps = fps)
     display(movie)
     return movie
 end

@@ -2,7 +2,7 @@
 
 # %% Setup
 include(joinpath(dirname(@__DIR__), "config.jl"))
-paths = get_project_paths("examples") # For OUT_DIR, GEO_DIR etc.
+paths = get_project_paths(@__DIR__) # For OUT_DIR, GEO_DIR etc.
 GEO_DIR = paths["GEO_DIR"]
 OUT_DIR = paths["OUT_DIR"] # Ensure OUT_DIR is defined here
 include("../src/MagnetostaticsFEM.jl")
@@ -33,10 +33,13 @@ dirichlet_value = 0.0 + 0.0im # Dirichlet BC for A = u + iv
 
 mesh_file = joinpath(GEO_DIR, "coil_geo.msh")
 # --- Output Parameters ---
-pvd_output_base = joinpath(OUT_DIR, "harmonic_1d_results_jl") 
+output_dir = joinpath(OUT_DIR, "harmonic_1d_results_jl")
+if !isdir(output_dir)   
+    mkdir(output_dir)
+end
 
 println("Mesh file: ", mesh_file)
-println("Output PVD base: ", pvd_output_base)
+println("Output PVD base: ", output_dir)
 
 # %% Call the new preparation and solving function from TransientSolver
 solution_harmonic, Az0_out, Ω_out, ν_func_map, σ_func_map, tags = 
@@ -54,18 +57,18 @@ solution_harmonic, Az0_out, Ω_out, ν_func_map, σ_func_map, tags =
     )
 
 # %% Post-processing:
-Az_mag, B_mag, Jeddy_mag, Az_re, Az_im, B_re, B_im, J_eddy_re, J_eddy_im, ν_field_linear = process_harmonic_solution(solution_harmonic, Ω_out, ν_func_map, σ_func_map, ω_source, tags)
+Az_mag, B_mag, J_eddy_mag, Az_re, Az_im, B_re, B_im, J_eddy_re, J_eddy_im, ν_field_linear = process_harmonic_solution(solution_harmonic, Ω_out, ν_func_map, σ_func_map, ω_source, tags)
 
-save_results_vtk(Ω_out, pvd_output_base, 
+save_results_vtk(Ω_out, output_dir, 
     Dict(
         "Az_re" => Az_re, "Az_im" => Az_im, "Az_mag" => Az_mag,
         "B_re" => B_re, "B_im" => B_im, "B_mag" => B_mag,
-        "Jeddy_re" => J_eddy_re, "Jeddy_im" => J_eddy_im, "Jeddy_mag" => Jeddy_mag,
+        "J_eddy_re" => J_eddy_re, "J_eddy_im" => J_eddy_im, "J_eddy_mag" => J_eddy_mag,
         "ν_linear" => ν_field_linear
     )
 )
 
 
-plot_harmonic_magnitude_1d(Az_mag, B_mag, Jeddy_mag, ν_field_linear; output_path=pvd_output_base)
+plot_harmonic_magnitude_1d(Az_mag, B_mag, J_eddy_mag, ν_field_linear; output_path=output_dir)
 
-plot_harmonic_animation_1d(solution_harmonic, Ω_out, ω_source; output_path=pvd_output_base)
+plot_harmonic_animation_1d(Az_re, Az_im, Az_mag, B_re, B_im, B_mag, J_eddy_re, J_eddy_im, J_eddy_mag, ν_field_linear, ω_source; output_path=output_dir)
