@@ -37,8 +37,8 @@ wcoil = wgap;
 hcoil = hgap;
 
 # Mesh densities
-lc1 = 2e-2;      # Enclosure & core outer
-lc2 = 5e-3;      # Core inner
+lc1 = 5e-3;      # Enclosure & core outer
+lc2 = 2e-3;      # Core inner
 
 function gmsh_add_rectangle(mid, width, height, lc)
     geo = gmsh.model.geo;
