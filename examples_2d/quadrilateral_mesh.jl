@@ -214,11 +214,11 @@ gmsh.model.setPhysicalName(1, 1, "Enclosure")
 geo.synchronize()
 
 ## Define structured meshes
-N1 = 50;
+N1 = 10;
 N2 = 10;
-N3 = 30;
-alpha = 0.05;
-alpha2 = 0.05;
+N3 = 10;
+alpha = 0.1;
+alpha2 = 0.1;
 
 mesh.setTransfiniteCurve(core_lines1[2], N1, "Bump", alpha)
 mesh.setTransfiniteCurve(core_lines1[3], N1, "Bump", alpha)
