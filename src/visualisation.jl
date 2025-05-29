@@ -276,11 +276,14 @@ function create_field_animation(
     
     # Calculate B field if not provided
     if B_field_complex === nothing
-        println("B_field_complex not provided, attempting to calculate using PostProcessing.calculate_b_field...")
+        println("B_field_complex not provided, attempting to calculate B-field from vector potential...")
         try
-            B_re_calc, B_im_calc = PostProcessing.calculate_b_field(uv_complex)
+            # Calculate B field directly instead of using PostProcessing module
+            # B = -∇(Az)
+            B_re_calc = -∇(u)
+            B_im_calc = -∇(v)
         catch e_bfield
-            println("Warning: Could not calculate B-field using PostProcessing.calculate_b_field. Error: $e_bfield. B-field will not be plotted.")
+            println("Warning: Could not calculate B-field from vector potential. Error: $e_bfield. B-field will not be plotted.")
             B_re_calc, B_im_calc = nothing, nothing
         end
     else

@@ -26,6 +26,7 @@ include("fem_solver.jl")
 include("post_processing.jl")
 include("mesh_handling.jl")
 include("transient_solver.jl")   # New
+include("nonlinear_solver.jl")  # Added nonlinear_solver.jl
 include("signal_processing.jl")  # New
 include("comparison_utils.jl")   # New
 include("visualisation.jl")      # Expanded
@@ -45,7 +46,7 @@ export solve_fem_problem, get_fem_matrices_and_vector, save_data_serialized, loa
 
 # From post_processing.jl
 using .PostProcessing
-export calculate_b_field, calculate_eddy_current, save_results_vtk, save_pvd_and_extract_signal, save_transient_pvd, process_harmonic_solution
+export calculate_b_field, calculate_eddy_current, save_results_vtk, save_pvd_and_extract_signal, save_transient_pvd, process_harmonic_solution, calculate_b_magnitude_from_az_transient # Added calculate_b_magnitude_from_az_transient
 
 # From mesh_handling.jl
 export load_mesh_and_tags
@@ -59,7 +60,7 @@ export ThetaMethod # Now imported from Gridap.ODEs.ODETools
 
 # From signal_processing.jl
 using .SignalProcessing
-export perform_fft
+export perform_fft, select_periodic_window, perform_fft_periodic
 
 # From comparison_utils.jl
 # using .ComparisonUtils (no exports yet from placeholder)
