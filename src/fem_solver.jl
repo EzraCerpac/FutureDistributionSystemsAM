@@ -2,9 +2,9 @@ using Gridap
 using Gridap.FESpaces
 using Gridap.MultiField
 using LinearAlgebra
-using WriteVTK # For existing solve_fem_problem
-using Serialization # For new save/load functions
-include("problems.jl") 
+using WriteVTK
+using Serialization
+include("problems.jl")
 
 """
     setup_fe_spaces(model, order::Int, field_type::Type, dirichlet_tag::String, dirichlet_value)
@@ -14,26 +14,17 @@ Handles single-field (Real) or multi-field (for complex split) cases.
 """
 function setup_fe_spaces(model, order::Int, field_type::Type, dirichlet_tag::String, dirichlet_value)
     if field_type == ComplexF64
-        # Multi-field setup for u + iv
-        println("Setting up multi-field spaces (Real, Imag) for Complex problem.")
         reffe = ReferenceFE(lagrangian, Float64, order)
-        
-        # Define test spaces for real and imaginary parts
         V_re = TestFESpace(model, reffe; dirichlet_tags=[dirichlet_tag])
         V_im = TestFESpace(model, reffe; dirichlet_tags=[dirichlet_tag])
         V = MultiFieldFESpace([V_re, V_im])
-
-        # Define trial spaces with potentially complex Dirichlet values split
-        u_D = real(field_type(dirichlet_value)) # Real part of BC
-        v_D = imag(field_type(dirichlet_value)) # Imag part of BC
+        u_D = real(field_type(dirichlet_value))
+        v_D = imag(field_type(dirichlet_value))
         U_re = TrialFESpace(V_re, u_D)
         U_im = TrialFESpace(V_im, v_D)
         U = MultiFieldFESpace([U_re, U_im])
-        
         return U, V
     elseif field_type <: Real
-         # Single-field setup
-        println("Setting up single-field space.")
         reffe = ReferenceFE(lagrangian, field_type, order)
         V = TestFESpace(model, reffe; dirichlet_tags=[dirichlet_tag])
         U = TrialFESpace(V, field_type(dirichlet_value)) 
@@ -46,7 +37,7 @@ end
 
 """
     solve_fem_problem(
-        problem::WeakFormProblem, 
+        problem::WeakFormProblem,
         U, # Can be SingleFieldFESpace or MultiFieldFESpace
         V  # Can be SingleFieldFESpace or MultiFieldFESpace
     )
@@ -57,10 +48,8 @@ Handles both single-field and multi-field problems.
 function solve_fem_problem(problem::WeakFormProblem, U, V)
     a = problem.a
     b = problem.b
-
     op = AffineFEOperator(a, b, U, V)
-    
-    ls = LUSolver() 
+    ls = LUSolver()
     solver = LinearFESolver(ls)
     solution = solve(solver, op)
     return solution
@@ -74,35 +63,28 @@ Handles both real and complex solutions.
 """
 function extract_solution_values(solution)
     if isa(solution, MultiFieldFEFunction)
-        # Complex solution case - extract real and imaginary parts
-        u_field = solution[1]  # Real part
-        v_field = solution[2]  # Imaginary part
-        
-        # Convert to cell arrays
+        u_field = solution[1]
+        v_field = solution[2]
         u_cell = get_cell_dof_values(u_field)
         v_cell = get_cell_dof_values(v_field)
-        
-        # Convert to matrices
+
         u = convert_to_matrix(u_cell)
         v = convert_to_matrix(v_cell)
-        
-        return u + 1im * v  # Combine real and imaginary parts
-    else
-        # Real-valued solution case
+        return u + 1im * v
+    else  # Real-valued solution case
         u_cell = get_cell_dof_values(solution)
         u = convert_to_matrix(u_cell)
         return u
     end
 end
 
+function convert_to_matrix(cell_values)
+    values = vcat(collect.(cell_values)...)
 """
     convert_to_matrix(cell_values)
 
 Helper function to convert cell values to a matrix format.
 """
-function convert_to_matrix(cell_values)
-    # Flatten the cell array into a vector
-    values = vcat(collect.(cell_values)...)
     return values
 end
 
@@ -133,29 +115,6 @@ function solve_fem_problem(problem::FEOperator, U, V) # U and V are FESpaces
     end
 end
 
-
-"""
-    get_fem_matrices_and_vector(
-        model::DiscreteModel,
-        order::Int,
-        dirichlet_tag::String,
-        dirichlet_value_scalar::Float64, # Scalar real Dirichlet value for the base space
-        Ω::Triangulation,
-        dΩ::Measure,
-        ν_cellfield::CellField, # Reluctivity as a CellField
-        σ_cellfield::CellField, # Conductivity as a CellField
-        Js_re_cellfield::CellField # Real part of source current as a CellField
-    )
-
-Assembles the stiffness matrix S, mass matrix M, and real part of the load vector f_re
-for the complex equation (S + jωM)A = Js, where A is complex and Js is assumed real here.
-
-S_ij = ∫( ν * ∇φ_j ⋅ ∇φ_i ) dΩ
-M_ij = ∫( σ * φ_j ⋅ φ_i ) dΩ
-f_re_i = ∫( J_s_real ⋅ v ) dΩ
-
-Returns S_matrix, M_matrix, f_re_vector, and the trial FE space U_scalar_trial.
-"""
 function get_fem_matrices_and_vector(
     model::DiscreteModel,
     order::Int,
@@ -168,50 +127,43 @@ function get_fem_matrices_and_vector(
     Js_re_cellfield::CellField
 )
     reffe_scalar = ReferenceFE(lagrangian, Float64, order)
-    # Test space defines where Dirichlet conditions are applied (on entities with dirichlet_tag)
     V_scalar_test = TestFESpace(model, reffe_scalar, conformity=:H1, dirichlet_tags=[dirichlet_tag])
-    # Trial space applies the actual dirichlet_value_scalar to the DOFs identified by V_scalar_test
     U_scalar_trial = TrialFESpace(V_scalar_test, dirichlet_value_scalar)
-
-    # Stiffness matrix S: ∫( ν * ∇u ⋅ ∇v ) dΩ
     a_S_form(u,v) = ∫( ν_cellfield * (∇(u) ⋅ ∇(v)) ) * dΩ
     S_matrix = assemble_matrix(a_S_form, U_scalar_trial, V_scalar_test)
-
-    # Mass matrix M: ∫( σ * u ⋅ v ) dΩ
     a_M_form(u,v) = ∫( σ_cellfield * u ⋅ v ) * dΩ
     M_matrix = assemble_matrix(a_M_form, U_scalar_trial, V_scalar_test)
-
-    # Load vector f_re: ∫( J_s_real ⋅ v ) dΩ
     l_f_re_form(v) = ∫( Js_re_cellfield * v ) * dΩ
     f_re_vector = assemble_vector(l_f_re_form, V_scalar_test)
-    
     return S_matrix, M_matrix, f_re_vector, U_scalar_trial
 end
 
-"""
-    save_data_serialized(filepath::String, data)
-
-Serializes and saves data to the specified filepath.
-Creates the directory if it does not exist.
-"""
 function save_data_serialized(filepath::String, data)
-    mkpath(dirname(filepath)) # Ensure directory exists
+    mkpath(dirname(filepath))
     open(filepath, "w") do f
         serialize(f, data)
     end
-    println("Saved data to $(filepath)")
 end
 
-"""
-    load_data_serialized(filepath::String)
-
-Loads and deserializes data from the specified filepath.
-"""
 function load_data_serialized(filepath::String)
     local data
     open(filepath, "r") do f
         data = deserialize(f)
     end
-    println("Loaded data from $(filepath)")
     return data
+end
+
+function prepare_and_solve_harmonic_1d(mesh_file::String, order::Int, field_type::Type, dirichlet_tag::String, dirichlet_value::ComplexF64, μ0::Float64, μr_core::Float64, σ_core::Float64, J0_amplitude::Float64, ω_source::Float64)
+    model, labels, tags = load_mesh_and_tags(mesh_file)
+    material_tags = get_material_tags(labels)
+    Ω = Triangulation(model)
+    dΩ = Measure(Ω, 2*order)
+    ν_func_map = define_reluctivity(material_tags, μ0, μr_core)
+    σ_func_map = define_conductivity(material_tags, σ_core)
+    source_current_func = define_current_density(material_tags, J0_amplitude)
+    U, V = setup_fe_spaces(model, order, field_type, dirichlet_tag, dirichlet_value)
+    problem = magnetodynamics_harmonic_coupled_weak_form(Ω, dΩ, tags, ν_func_map, σ_func_map, source_current_func, ω_source)
+    solution = solve_fem_problem(problem, U, V)
+    Az0 = solution[1]
+    return solution, Az0, Ω, ν_func_map, σ_func_map, tags
 end

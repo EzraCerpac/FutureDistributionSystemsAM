@@ -6,19 +6,13 @@ paths = get_project_paths("examples") # For OUT_DIR, GEO_DIR etc.
 GEO_DIR = paths["GEO_DIR"]
 OUT_DIR = paths["OUT_DIR"] # Ensure OUT_DIR is defined here
 include("../src/MagnetostaticsFEM.jl")
-# include("../src/transient_solver.jl") # Already in MagnetostaticsFEM
-# include("../src/post_processing.jl") # Already in MagnetostaticsFEM
-# include("../src/visualisation.jl")   # Already in MagnetostaticsFEM
 
 using LinearAlgebra
 using Plots
 using LaTeXStrings
 using Gridap
 using .MagnetostaticsFEM # This brings all exported functions into scope
-# using .TransientSolver    # Now part of MagnetostaticsFEM
-# using .PostProcessing     # Now part of MagnetostaticsFEM
 using Printf # For animation title formatting
-# using .Visualisation # Now part of MagnetostaticsFEM
 
 println("--- Starting Transient 1D Magnetodynamics Example ---")
 
@@ -50,12 +44,15 @@ num_periods_collect_fft = 3 # Use last N periods for FFT to avoid initial transi
 
 # --- Output Parameters ---
 mesh_file = joinpath(GEO_DIR, "coil_geo.msh")
-pvd_output_base = joinpath(OUT_DIR, "transient_1d_results_jl") 
-fft_plot_path = joinpath(OUT_DIR, "transient_1d_fft.pdf")
-time_signal_plot_path = joinpath(OUT_DIR, "transient_1d_signal.pdf")
+output_dir = joinpath(OUT_DIR, "transient_1d_results_jl") 
+if !isdir(output_dir)
+    mkdir(output_dir)
+end
+fft_plot_path = joinpath(output_dir, "transient_1d_fft.pdf")
+time_signal_plot_path = joinpath(output_dir, "transient_1d_signal.pdf")
 
 println("Mesh file: ", mesh_file)
-println("Output PVD base: ", pvd_output_base)
+println("Output directory: ", output_dir)
 
 # %% Call the new preparation and solving function from TransientSolver
 solution_transient_iterable, Az0_out, Ω_out, ν_cf_out, σ_cf_out, Js_t_func_out, model_out, tags_cf_out, labels_out = 
@@ -76,19 +73,20 @@ solution_transient_iterable, Az0_out, Ω_out, ν_cf_out, σ_cf_out, Js_t_func_ou
     )
 
 # %% Post-processing:
+
 x_probe = VectorValue(-0.03) 
 steps_for_fft_start_time = tF - (num_periods_collect_fft / freq)
-
-processed_pvd_filename_base = first(splitext(pvd_output_base)) 
 
 time_steps_for_fft, time_signal_data = MagnetostaticsFEM.save_pvd_and_extract_signal( # Called via MagnetostaticsFEM
     solution_transient_iterable,
     Az0_out, # Pass Az0_out
     Ω_out,   # Pass Ω_out
-    processed_pvd_filename_base, 
     t0,
     x_probe,
     steps_for_fft_start_time,
+    σ_cf_out, # Pass conductivity CellField for enhanced J_eddy calculation
+    Δt_val,   # Pass time step for enhanced calculations;
+    output_dir=output_dir
 )
 
 # %% Process extracted signal (same as before)
@@ -102,7 +100,7 @@ end
 
 MagnetostaticsFEM.plot_time_signal(time_steps_for_fft, time_signal_data, 
                  title_str="Az at x=$(x_probe[1]) (last $(num_periods_collect_fft) periods)",
-                 output_path=time_signal_plot_path)
+                 output_path=joinpath(output_dir, "transient_1d_signal.pdf"))
 
 # %% FFT Analysis
 println("Performing FFT analysis...")
@@ -114,7 +112,7 @@ max_freq_plot = freq * 3
 MagnetostaticsFEM.plot_fft_spectrum(fft_frequencies, fft_magnitudes,
                   title_str="FFT Spectrum of Az at x=$(x_probe[1])",
                   xlims_val=(0, max_freq_plot),
-                  output_path=fft_plot_path)
+                  output_path=joinpath(output_dir, "transient_1d_fft.pdf"))
 
 if !isempty(fft_magnitudes) && !isempty(fft_frequencies)
     max_magnitude_fft, idx_max = findmax(fft_magnitudes)
@@ -144,9 +142,8 @@ println("can be compared with the magnitude of Az from a frequency-domain soluti
 
 println("\n--- Transient 1D example finished successfully! ---")
 
-# %% Generate Animation
-println("\nGenerating transient animation...")
-transient_animation_path = joinpath(OUT_DIR, "transient_1d_animation.gif")
+# %% Generate Enhanced Animation with B-field and J_eddy
+transient_animation_path = joinpath(output_dir, "transient_1d_enhanced_animation.gif")
 MagnetostaticsFEM.create_transient_animation(
     Ω_out, 
     solution_transient_iterable, 
@@ -157,6 +154,3 @@ MagnetostaticsFEM.create_transient_animation(
     fps=10,
     consistent_axes=true # Optional: use consistent axes
 )
-println("Animation generation process initiated. Check console for progress/completion.")
-
-# %% End of script

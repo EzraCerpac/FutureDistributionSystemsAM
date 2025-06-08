@@ -2,6 +2,7 @@
 
 **/output/
 src/doc_figures/
+ta_example*/
 
 
 # JetBrains IDEs
@@ -18,6 +19,9 @@ out/
 *.code-workspace
 .history/
 .cursor/
+.claude/
+CLAUDE.md
+.windsurfrules
 
 # Python
 __pycache__/

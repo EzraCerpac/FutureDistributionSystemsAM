@@ -7,8 +7,9 @@ using Gridap.MultiField: MultiFieldFEFunction
 using Gridap.Visualization: createpvd, createvtk, vtk_save, VTKCellData # Ensure createvtk is imported
 using Gridap.FESpaces: FEFunction # Added for type hint
 
-export calculate_b_field, save_results_vtk, calculate_eddy_current # Existing exports
-export save_pvd_and_extract_signal, save_transient_pvd # New export
+export calculate_b_field, save_results_vtk, calculate_eddy_current
+export save_pvd_and_extract_signal, save_transient_pvd
+export calculate_transient_jeddy, process_transient_solution, process_harmonic_solution
 
 """
     calculate_b_field(Az) -> B
@@ -44,25 +45,23 @@ function calculate_b_field(Az::Vector{ComplexF64})
     error("calculate_b_field for Vector{ComplexF64} is not implemented yet.")
 end
 
-function save_results_vtk(Ω::Triangulation, output_file_base::String, fields_dict::Dict{String, Any}; append::Bool=false)
+function save_results_vtk(Ω::Triangulation, output_dir::String, fields_dict::Dict{String, Any}; append::Bool=false)
     # Ensure the output directory exists
-    output_dir = dirname(output_file_base)
     if !isdir(output_dir)
         mkpath(output_dir)
     end
 
-    base_name = first(splitext(output_file_base))
-    full_output_path = base_name * ".vtk"
-    
+    base_name = "solution"
+
     try
-        Gridap.writevtk(Ω, full_output_path; cellfields=fields_dict)
-        println("Successfully saved results to $(full_output_path)")
+        Gridap.writevtk(Ω, joinpath(output_dir, base_name); cellfields=fields_dict)
+        println("Successfully saved results to $(output_dir)")
     catch e
         println("Error saving single VTK file: $(e)")
         println("Attempting to save components individually...")
         # Fallback: Save each component to a separate file if the combined save fails
         for (name, field) in fields_dict
-            individual_output_path = base_name * "_" * name * ".vtk"
+            individual_output_path = joinpath(output_dir, base_name * "_" * name * ".vtk")
             try
                 # Removing explicit append here as well.
                 Gridap.writevtk(Ω, individual_output_path; cellfields=Dict(name => field))
@@ -83,7 +82,13 @@ Saves FE results to a VTK file or a PVD time series.
 If `save_time_series` is false (default): Saves components of MultiFieldFEFunction (e.g., `_re`, `_im`) or scalar fields to a single VTK file using `WriteVTK.writevtk`.
 If `save_time_series` is true: Saves instantaneous values over one period (2π/ω) to a PVD collection referencing multiple VTK files using `Gridap.Visualization.createpvd` and `createvtk`. Requires `ω` to be provided.
 """
-function save_results_vtk(Ω, filenamebase, fields::Dict; save_time_series::Bool=false, ω::Union{Float64, Nothing}=nothing, nframes::Int=20)
+function save_results_vtk(Ω, output_dir, fields::Dict; save_time_series::Bool=false, ω::Union{Float64, Nothing}=nothing, nframes::Int=20)
+    if !isdir(output_dir)
+        mkpath(output_dir)
+    end
+
+    base_name = "solution"
+
 
     if save_time_series
         if ω === nothing
@@ -98,7 +103,7 @@ function save_results_vtk(Ω, filenamebase, fields::Dict; save_time_series::Bool
         t_vec = range(0, T_period, length=nframes)
 
         # Use createpvd with a do-block
-        createpvd(filenamebase) do pvd
+        createpvd(joinpath(output_dir, base_name)) do pvd
             for (i, t_step) in enumerate(t_vec)
                 cos_wt = cos(ω * t_step)
                 sin_wt = sin(ω * t_step)
@@ -157,7 +162,7 @@ function save_results_vtk(Ω, filenamebase, fields::Dict; save_time_series::Bool
                 # --- End of logic for calculating vtk_fields_inst ---
 
                 # Generate filename for this time step's VTU file
-                filename_t = filenamebase * "_t$(lpad(i, 4, '0'))"
+                filename_t = joinpath(output_dir, base_name * "_t$(lpad(i, 4, '0'))")
 
                 try
                     # Use createvtk to generate the VTKFile object and add it to the PVD
@@ -172,7 +177,7 @@ function save_results_vtk(Ω, filenamebase, fields::Dict; save_time_series::Bool
             end
         end # End of createpvd block (automatically saves the PVD file)
 
-        println("Time series PVD collection saved to $filenamebase.pvd")
+        println("Time series PVD collection saved to $(joinpath(output_dir, base_name)).pvd")
         return # Exit after saving time series
 
     else
@@ -200,15 +205,15 @@ function save_results_vtk(Ω, filenamebase, fields::Dict; save_time_series::Bool
 
         try
             # Use WriteVTK.writevtk for the single file case
-            WriteVTK.writevtk(Ω, filenamebase, cellfields=vtk_fields, order=2)
-            println("Results saved to $filenamebase.vtu")
+            writevtk(Ω, joinpath(output_dir, base_name), cellfields=vtk_fields, order=2)
+            println("Results saved to $(joinpath(output_dir, base_name)).vtu")
         catch e
             println("Error saving single VTK file: $e")
             println("Attempting to save components individually...")
             for (name, field) in vtk_fields
                  try
-                     WriteVTK.writevtk(Ω, filenamebase * "_$name", cellfields=Dict(name => field), order=2)
-                     println("Saved component $name separately to $(filenamebase)_$name.vtu")
+                     writevtk(Ω, joinpath(output_dir, base_name * "_$name"), cellfields=Dict(name => field), order=2)
+                     println("Saved component $name separately to $(joinpath(output_dir, base_name * "_$name")).vtu")
                  catch e_comp
                      println("Failed to save component $name. Error: $e_comp")
                  end
@@ -245,6 +250,99 @@ function calculate_eddy_current(uv::MultiFieldFEFunction, conductivity_func, ome
 end
 
 """
+    calculate_transient_jeddy(Az_current::FEFunction, Az_previous::FEFunction, σ_cf::Union{CellField, Function, Number}, Δt::Float64, Ω::Triangulation; initial_step::Bool=false) -> CellField
+
+Calculates transient eddy current density J_eddy = -σ * (Az_current - Az_previous) / Δt.
+For the initial step or when Δt ≤ 1e-9, returns zero current.
+"""
+function calculate_transient_jeddy(Az_current::FEFunction, Az_previous::FEFunction, σ_cf::Union{CellField, Function, Number}, Δt::Float64, Ω::Triangulation; initial_step::Bool=false)
+    if initial_step || Δt <= 1e-9
+        return CellField(0.0, Ω)
+    else
+        return -σ_cf .* (Az_current .- Az_previous) ./ Δt
+    end
+end
+
+"""
+    process_transient_solution(solution_iterable, Az0::FEFunction, Ω::Triangulation, σ_cf::Union{CellField, Function, Number}, Δt::Float64) -> Vector{Tuple}
+
+Processes a transient solution iterable to calculate B-field and J_eddy for each time step.
+Returns a vector of tuples: [(Az_n, B_n, J_eddy_n, tn), ...] where:
+- Az_n: Vector potential at time step n
+- B_n: Magnetic field B = -∇(Az_n) 
+- J_eddy_n: Eddy current density
+- tn: Time at step n
+"""
+function process_transient_solution(solution_iterable, Az0::FEFunction, Ω::Triangulation, σ_cf::Union{CellField, Function, Number}, Δt::Float64)
+    processed_steps = []
+    
+    # Process initial condition
+    B0 = calculate_b_field(Az0)
+    J_eddy_0 = CellField(0.0, Ω)  # Zero at initial time
+    push!(processed_steps, (Az0, B0, J_eddy_0, 0.0))
+    
+    Az_prev = Az0
+    t_prev = 0.0
+    
+    for (step_idx, (Az_n, tn)) in enumerate(solution_iterable)
+        # Calculate B-field
+        B_n = calculate_b_field(Az_n)
+        
+        # Calculate effective time step
+        Δt_eff = tn - t_prev
+        if Δt_eff <= 1e-9
+            Δt_eff = Δt  # Fallback to nominal Δt
+        end
+        
+        # Calculate J_eddy for this step
+        J_eddy_n = calculate_transient_jeddy(Az_n, Az_prev, σ_cf, Δt_eff, Ω; initial_step=false)
+        
+        push!(processed_steps, (Az_n, B_n, J_eddy_n, tn))
+        
+        # Update previous values for next iteration
+        Az_prev = Az_n
+        t_prev = tn
+        
+        if step_idx % 50 == 0
+            println("Processed transient step $(step_idx) at t=$(tn)")
+        end
+    end
+    
+    println("Processed $(length(processed_steps)) total transient steps including initial condition.")
+    return processed_steps
+end
+
+function process_harmonic_solution(solution::MultiFieldFEFunction, Ω::Triangulation, reluctivity_func, conductivity_func, ω::Float64, tags::AbstractArray)
+    # A field components
+    Az_re = solution[1]
+    Az_im = solution[2]
+    
+    # Compute B-field (Real and Imag parts)
+    B_re, B_im = calculate_b_field(solution)
+
+    # Compute Eddy Currents (Real and Imag parts)
+    # Ensure conductivity_func here is for electrical conductivity
+    J_eddy_re, J_eddy_im = calculate_eddy_current(solution, conductivity_func, ω, Ω, tags)
+
+    # Define helper functions for magnitude squared
+    mag_sq_scalar(re, im) = re*re + im*im
+    mag_sq_vector(re, im) = inner(re, re) + inner(im, im)
+
+    # Calculate Magnitudes for saving/plotting using composition
+    Az_mag = sqrt ∘ (mag_sq_scalar ∘ (Az_re, Az_im))
+    B_mag = sqrt ∘ (mag_sq_vector ∘ (B_re, B_im))
+    Jeddy_mag_squared = mag_sq_vector ∘ (J_eddy_re, J_eddy_im)
+    Jeddy_mag = sqrt ∘ (mag_sq_scalar ∘ (J_eddy_re, J_eddy_im))
+
+    τ_cell_field = CellField(tags, Ω) # 'tags' is the vector of cell tags, Ω is Triangulation
+    ν_field_linear = Operation(reluctivity_func)(τ_cell_field)
+
+    return Az_mag, B_mag, Jeddy_mag, Az_re, Az_im, B_re, B_im, J_eddy_re, J_eddy_im, ν_field_linear
+end
+    
+
+
+"""
     save_pvd_and_extract_signal(
         solution_iterable, 
         Az0::FEFunction, 
@@ -253,48 +351,79 @@ end
         t0::Float64, 
         x_probe::Union{Point, VectorValue}, 
         steps_for_fft_start_time::Float64,
-        freq::Float64,
-        num_periods_collect_fft::Real # Can be Int or Float
+        σ_cf::Union{CellField, Function, Number}, 
+        Δt::Float64
     ) -> Tuple{Vector{Float64}, Vector{Float64}}
 
-Saves transient solution snapshots to a PVD file and extracts the time signal of Az at a probe point.
-This function is adapted from the post-processing block in `examples/transient_1d.jl`.
+Saves transient solution snapshots to a PVD file with B-field and J_eddy calculations, and extracts the time signal of Az at a probe point.
+Enhanced version that includes B-field and eddy current calculations in VTK output.
 """
 function save_pvd_and_extract_signal(
     solution_iterable, 
     Az0::FEFunction, 
     Ω::Triangulation, 
-    pvd_filename_base::String, 
     t0::Float64, 
     x_probe::Union{Point, VectorValue}, 
     steps_for_fft_start_time::Float64,
+    σ_cf::Union{CellField, Function, Number}, 
+    Δt::Float64;
+    output_dir=nothing,
 )
     time_signal_data = Float64[]
     time_steps_for_fft = Float64[]
 
-    println("Extracting solution at probe point $(x_probe) and saving PVD to $(pvd_filename_base).pvd...")
+    if output_dir === nothing
+        error("output_dir must be provided.")
+    end
+
+    pvd_filename_base = joinpath(output_dir, "solution")
+    
+    # Process transient solution to get B and J_eddy for all steps
+    processed_steps = process_transient_solution(solution_iterable, Az0, Ω, σ_cf, Δt)
     
     # Ensure Gridap.Visualization is accessible for createpvd/createvtk
     createpvd(pvd_filename_base) do pvd_file
-        # Save initial condition
-        try
-            # Using a slightly more robust naming for snapshot files
-            pvd_file[t0] = createvtk(Ω, pvd_filename_base * "_t_initial_snapshot", cellfields=Dict("Az" => Az0))
-            println("Saved initial condition to PVD.")
-        catch e_pvd_init
-            println("Error saving initial condition to PVD: $e_pvd_init")
-        end
-
-        for (i, (Az_n, tn)) in enumerate(solution_iterable)
+        # Process each step including initial condition
+        for (step_idx, (Az_n, B_n, J_eddy_n, tn)) in enumerate(processed_steps)
             try
-                # Ensure filename compatibility for createvtk, avoid issues with '.' from Printf
+                # Ensure filename compatibility for createvtk
                 tn_str_for_file = replace(Printf.@sprintf("%.4f", tn), "." => "p")
-                pvd_file[tn] = createvtk(Ω, pvd_filename_base * "_t_$(tn_str_for_file)_snapshot", cellfields=Dict("Az" => Az_n))
+                filename_base = pvd_filename_base * "_t_$(tn_str_for_file)_snapshot"
+                
+                # Create comprehensive field dictionary for VTK output
+                vtk_fields = Dict{String, Any}()
+                vtk_fields["Az"] = Az_n
+                
+                # Add B-field components
+                dim = num_cell_dims(Ω)
+                if dim == 1
+                    # For 1D, B is a vector but we typically want Bx component
+                    vtk_fields["Bx"] = Operation(b_vec -> b_vec[1])(B_n)
+                    vtk_fields["B_magnitude"] = Operation(b_vec -> sqrt(inner(b_vec, b_vec)))(B_n)
+                elseif dim == 2
+                    # For 2D, add both components and magnitude
+                    vtk_fields["Bx"] = Operation(b_vec -> b_vec[1])(B_n)
+                    vtk_fields["By"] = Operation(b_vec -> b_vec[2])(B_n) 
+                    vtk_fields["B_magnitude"] = Operation(b_vec -> sqrt(inner(b_vec, b_vec)))(B_n)
+                end
+                
+                # Add eddy current
+                vtk_fields["J_eddy"] = J_eddy_n
+                
+                pvd_file[tn] = createvtk(Ω, filename_base, cellfields=vtk_fields)
+                
+                if step_idx == 1
+                    println("Saved initial condition (t=$(tn)) with enhanced fields to PVD.")
+                elseif step_idx % 20 == 0
+                    println("Saved enhanced step $(step_idx-1) (t=$(tn)) to PVD.")
+                end
+                
             catch e_pvd_step
-                println("Error saving step t=$tn to PVD: $e_pvd_step")
+                println("Error saving enhanced step t=$tn to PVD: $e_pvd_step")
             end
             
-            if tn >= steps_for_fft_start_time
+            # Extract probe signal for FFT analysis (skip initial condition for signal extraction)
+            if step_idx > 1 && tn >= steps_for_fft_start_time
                 push!(time_steps_for_fft, tn)
                 try
                     probe_val = Az_n(x_probe)
@@ -311,10 +440,6 @@ function save_pvd_and_extract_signal(
                     println("Warning: Could not evaluate Az_n at probe point $(x_probe) for t=$(tn). Error: $e_probe. Storing NaN.")
                     push!(time_signal_data, NaN)
                 end
-            end
-
-            if i % 20 == 0 
-                println("Processed PVD save for t=$(@sprintf("%.4f", tn))")
             end
         end
     end
