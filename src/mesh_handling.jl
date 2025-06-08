@@ -35,6 +35,22 @@ function get_material_tags(labels)
     )
 end
 
+function get_material_tags_oil(labels)
+    tag_air = get_tag_from_name(labels, "Air")
+    tag_core = get_tag_from_name(labels, "Core")
+    tag_oil = get_tag_from_name(labels, "Oil")
+    # Adjust names based on actual Gmsh physical group names
+    tag_coil1 = get_tag_from_name(labels, "Coil left") 
+    tag_coil2 = get_tag_from_name(labels, "Coil right")
+    return Dict(
+        "Air" => tag_air,
+        "Core" => tag_core,
+        "Coil1" => tag_coil1,
+        "Coil2" => tag_coil2,
+        "Oil" => tag_oil
+    )
+end
+
 """
     get_material_tags_2d(labels)
 

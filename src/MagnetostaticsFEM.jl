@@ -29,11 +29,13 @@ include("transient_solver.jl")   # New
 include("signal_processing.jl")  # New
 include("comparison_utils.jl")   # New
 include("visualisation.jl")      # Expanded
+include("heat_solver.jl")        # New for heat dynamics
+
 
 # Export functions to be available for users of the module
 
 # From problem_definition.jl
-export define_reluctivity, define_conductivity, define_current_density, get_material_tags
+export define_reluctivity, define_conductivity, define_current_density, get_material_tags, get_material_tags_oil
 
 # From problems.jl
 export setup_fe_spaces, magnetostatics_weak_form, magnetodynamics_harmonic_coupled_weak_form
@@ -67,5 +69,11 @@ export perform_fft
 # From visualisation.jl (Expanded)
 using .Visualisation
 export plot_contour_2d, create_field_animation, plot_time_signal, plot_fft_spectrum, plot_line_1d, create_transient_animation
+
+# From problem_definition.jl
+export define_heat_conductivity
+
+# From heat_solver.jl
+export define_heat_source, solve_heatdynamics
 
 end

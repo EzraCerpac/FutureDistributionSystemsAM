@@ -2,7 +2,7 @@ using Gridap
 using LinearAlgebra
 include("problem_definition.jl")
 
-function define_heat_conductivity(material_tags::Dict{String, Int}, k_core::Float64, k_coil::Float64, k_air::Float64; core_tag_name="Core", coil_tags=["Coil1", "Coil2"], air_tag_name="Air")
+function define_heat_conductivity(material_tags::Dict{String, Int}, k_core::Float64, k_coil::Float64, k_air::Float64, k_oil::Float64; core_tag_name="Core", coil_tags=["Coil1", "Coil2"], air_tag_name="Air", oil_tag_name="Oil")
     function conductivity(tag)
         if haskey(material_tags, core_tag_name) && tag == material_tags[core_tag_name]
             return k_core
@@ -10,6 +10,8 @@ function define_heat_conductivity(material_tags::Dict{String, Int}, k_core::Floa
             return k_coil
         elseif haskey(material_tags, air_tag_name) && tag == material_tags[air_tag_name]
             return k_air
+        elseif haskey(material_tags, oil_tag_name) && tag == material_tags[oil_tag_name]
+            return k_oil
         else
             @warn "Heat conductivity not defined for tag $(tag), returning 0.0"
             return 0.0
