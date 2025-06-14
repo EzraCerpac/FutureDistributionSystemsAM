@@ -174,18 +174,18 @@ By_vals = [b[1] for b in B_vals] # Extract y-component
 μ_vals_linear = 1 ./ ν_vals_linear # Convert reluctivity to permeability
 
 # Plot Static Fields
-p1 = plot(x_int * 1e2, Az_vals * 1e5, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"A_z(x)\ \mathrm{[mWb/cm]}", color=:black, lw=1.5, legend=false, title=L"A_z" *" (Static)", bottom_margin=8mm)
-p2 = plot(x_int * 1e2, By_vals * 1e3, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"B_y(x)\ \mathrm{[mT]}", color=:black, lw=1.5, legend=false, title=L"B_y" *" (Static)", bottom_margin=8mm)
-p3 = plot(x_int * 1e2, μ_vals_linear, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"\mu(x)\ \mathrm{[H/m]}", color=:black, lw=1.5, legend=false, title="Permeability (Linear)", bottom_margin=8mm)
+p1 = plot(x_int * 1e2, Az_vals * 1e5, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"A_z(x)\ \mathrm{[mWb/cm]}", color=:black, lw=1.5, legend=false, bottom_margin=8mm)#, title=L"A_z" *" (Static)")
+p2 = plot(x_int * 1e2, By_vals * 1e3, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"B_y(x)\ \mathrm{[mT]}", color=:black, lw=1.5, legend=false, bottom_margin=8mm)#, title=L"B_y" *" (Static)")
+# p3 = plot(x_int * 1e2, μ_vals_linear, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"\mu(x)\ \mathrm{[H/m]}", color=:black, lw=1.5, legend=false, title="Permeability (Linear)")
 
 # Add annotations with improved legibility (electromagnetic plots)
-for p in [p1, p2, p3]
+for p in [p1, p2]
     # Add background tinting for electromagnetic plots
     add_region_backgrounds!(p, boundaries_em, region_labels_em, [x_min_em, x_max_em])
     
     vline!(p, boundaries_em * 1e2, color=:grey, linestyle=:dash, alpha=0.6, label="")
     plot_ylims = Plots.ylims(p)
-    label_y = plot_ylims[1] - 0.06 * (plot_ylims[2] - plot_ylims[1])  # Reduced offset to prevent cutoff
+    label_y = plot_ylims[1] - 0.2 * (plot_ylims[2] - plot_ylims[1])  # Reduced offset to prevent cutoff
     
     # Add region labels with color scheme
     for i in eachindex(midpoints_em)
@@ -194,7 +194,8 @@ for p in [p1, p2, p3]
     end
 end
 
-plt_static = plot(p1, p2, p3, layout=(3,1), size=(800, 900), bottom_margin=10mm, left_margin=5mm, right_margin=5mm)
+plt_static = plot(p1, p2, layout=(2,1), size=(800, 800), bottom_margin=10mm, left_margin=5mm, right_margin=5mm)
+plot!(plt_static[1], title="Static")
 savefig(plt_static, joinpath(paths["OUTPUT_DIR"], "magnetostatics_1d_fields.pdf"))
 display(plt_static)
 

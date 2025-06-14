@@ -31,11 +31,11 @@ J0 = 2.2e4       # Source current density [A/m²] (Assumed Real)
 μ0 = 4e-7 * pi  # Vacuum permeability [H/m]
 μr_core = 5000.0 # Relative permeability of the core
 σ_core = 1e7    # Conductivity of the core [S/m]
-freq = 50    # Frequency [Hz]
+freq = 500    # Frequency [Hz]
 ω = 2 * pi * freq # Angular frequency [rad/s]
 
 # FEM Parameters
-order = 4
+order = 10
 field_type = ComplexF64 # Still use ComplexF64 marker for setup_fe_spaces
 dirichlet_tag = "D"
 dirichlet_value = 0.0 + 0.0im # Dirichlet BC for A = u + iv
