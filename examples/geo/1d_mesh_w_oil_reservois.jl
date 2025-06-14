@@ -25,6 +25,7 @@ c = 27.5e-3;
 
 # Oil reservoirs
 reservoir_width = 3 * (2*a-b) ;
+println("Reservoir width: ", reservoir_width)
 
 # Mesh density
 lc1 = 0.1;    # At x0 and x1
