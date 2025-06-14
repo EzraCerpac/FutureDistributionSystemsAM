@@ -20,6 +20,7 @@ using LaTeXStrings
 using Gridap
 using .MagnetostaticsFEM
 using Printf # For animation title formatting
+using Plots.PlotMeasures
 
 # %% [markdown]
 # ## Define Parameters and Paths
@@ -160,6 +161,38 @@ midpoints_em = [
 ]
 region_labels_em = ["Oil", "Core", "Coil L", "Core", "Coil R", "Core", "Oil"]
 
+# Define color scheme function
+function get_region_color(region_name)
+    if region_name == "Oil"
+        return :orange
+    elseif region_name == "Air"
+        return :blue
+    elseif region_name == "Transformer"
+        return :green
+    elseif region_name == "Core"
+        return :green
+    elseif occursin("Coil", region_name)
+        return :purple
+    else
+        return :black
+    end
+end
+
+# Define background tinting function
+function add_region_backgrounds!(p, x_boundaries, region_labels, x_range)
+    for i in 1:(length(x_boundaries)+1)
+        x_start = i == 1 ? x_range[1] : x_boundaries[i-1]
+        x_end = i == length(x_boundaries)+1 ? x_range[2] : x_boundaries[i]
+        
+        region_name = i <= length(region_labels) ? region_labels[i] : "Air"
+        base_color = get_region_color(region_name)
+        
+        # Add very light background tint
+        plot_ylims = Plots.ylims(p)
+        vspan!(p, [x_start*1e2, x_end*1e2], color=base_color, alpha=0.1, label="")
+    end
+end
+
 # Calculate midpoints for thermal plots (5 regions: detailed view)
 x_min_thermal = -1.0; x_max_thermal = 1.0  # Thermal plot range
 # Define oil region boundaries (based on mesh geometry)
@@ -204,20 +237,17 @@ hysterisis_loss_density = (x) -> 0.0
 
 eddy_loss_vals = [eddy_loss_density(x) for x in coord]
 # Plot the eddy loss density with simplified thermal annotations
-eddy_loss_plot = plot(x_int * 1e2, eddy_loss_vals, xlabel="x [cm]", ylabel="Eddy Loss Density [W/m³]", title="Eddy Current Loss Density", color=:blue, lw=1.5, legend=false)
+eddy_loss_plot = plot(x_int * 1e2, eddy_loss_vals, xlabel="x [cm]", ylabel="Eddy Loss Density [W/m³]", title="Eddy Current Loss Density", color=:blue, lw=1.5, legend=false, bottom_margin=8mm)
 
 # Add simplified mesh annotations to eddy loss plot
 vline!(eddy_loss_plot, boundaries_thermal * 1e2, color=:grey, linestyle=:dash, alpha=0.6, label="")
 plot_ylims = Plots.ylims(eddy_loss_plot)
-label_y = plot_ylims[1] - 0.10 * (plot_ylims[2] - plot_ylims[1])
+label_y = plot_ylims[1] - 0.06 * (plot_ylims[2] - plot_ylims[1])  # Reduced offset to prevent cutoff
+# Add background tinting for thermal plot
+add_region_backgrounds!(eddy_loss_plot, boundaries_thermal, region_labels_thermal, [x_min_thermal, x_max_thermal])
+
 for i in eachindex(midpoints_thermal)
-    color = if region_labels_thermal[i] == "Transformer"
-        :red
-    elseif region_labels_thermal[i] == "Oil"
-        :blue
-    else  # Air
-        :black
-    end
+    color = get_region_color(region_labels_thermal[i])
     annotate!(eddy_loss_plot, midpoints_thermal[i]*1e2, label_y, text(region_labels_thermal[i], 10, color, :center, :top))
 end
 
@@ -262,20 +292,17 @@ AAF_vals = [(((x[1] ≥ oil_xmin) && (x[1] ≤ oil_xmax)) ||
 
 # Plot and save the AAF (aging) plot with simplified thermal annotations
 AAF_plot = plot(x_int * 1e2, AAF_vals, xlabel="x [cm]", ylabel="Aging Acceleration Factor",
-     title="Oil Aging Acceleration Factor (Oil Only)", lw=2.5, color=:green)
+     title="Oil Aging Acceleration Factor (Oil Only)", lw=2.5, color=:green, bottom_margin=8mm, legend=false)
 
 # Add simplified mesh annotations to AAF plot
 vline!(AAF_plot, boundaries_thermal * 1e2, color=:grey, linestyle=:dash, alpha=0.6, label="")
 plot_ylims = Plots.ylims(AAF_plot)
-label_y_aaf = plot_ylims[1] - 0.10 * (plot_ylims[2] - plot_ylims[1])
+label_y_aaf = plot_ylims[1] - 0.13 * (plot_ylims[2] - plot_ylims[1])  # Reduced offset to prevent cutoff
+# Add background tinting for AAF plot
+add_region_backgrounds!(AAF_plot, boundaries_thermal, region_labels_thermal, [x_min_thermal, x_max_thermal])
+
 for i in eachindex(midpoints_thermal)
-    color = if region_labels_thermal[i] == "Transformer"
-        :red
-    elseif region_labels_thermal[i] == "Oil"
-        :blue
-    else  # Air
-        :black
-    end
+    color = get_region_color(region_labels_thermal[i])
     annotate!(AAF_plot, midpoints_thermal[i]*1e2, label_y_aaf, text(region_labels_thermal[i], 10, color, :center, :top))
 end
 
@@ -283,20 +310,18 @@ savefig(AAF_plot, joinpath(paths["OUTPUT_DIR"], "aging_acceleration_factor.png")
 display(AAF_plot)
 
 # Plot and save the temperature profile with simplified thermal annotations
-heat_plot = plot(x_int * 1e2, T_vals, xlabel="x [cm]", ylabel="Temperature [K]", title="Temperature Profile", lw=2.5, color=:red)
+heat_plot = plot(x_int * 1e2, T_vals, xlabel="x [cm]", ylabel="Temperature [K]", title="Temperature Profile", lw=2.5, color=:red, legend=false, bottom_margin=8mm)
+# ylims!(heat_plot, (273.15, maximum(T_vals)*1.05))  # Set y-limits with bottom at 273.15K
 
 # Add simplified mesh annotations to temperature plot
 vline!(heat_plot, boundaries_thermal * 1e2, color=:grey, linestyle=:dash, alpha=0.6, label="")
 plot_ylims = Plots.ylims(heat_plot)
-label_y_temp = plot_ylims[1] - 0.10 * (plot_ylims[2] - plot_ylims[1])
+label_y_temp = plot_ylims[1] - 0.13 * (plot_ylims[2] - plot_ylims[1])  # Reduced offset to prevent cutoff
+# Add background tinting for temperature plot
+add_region_backgrounds!(heat_plot, boundaries_thermal, region_labels_thermal, [x_min_thermal, x_max_thermal])
+
 for i in eachindex(midpoints_thermal)
-    color = if region_labels_thermal[i] == "Transformer"
-        :red
-    elseif region_labels_thermal[i] == "Oil"
-        :blue
-    else  # Air
-        :black
-    end
+    color = get_region_color(region_labels_thermal[i])
     annotate!(heat_plot, midpoints_thermal[i]*1e2, label_y_temp, text(region_labels_thermal[i], 10, color, :center, :top))
 end
 
@@ -322,32 +347,28 @@ Jeddy_mag_vals = Jeddy_mag(coord)
 μ_vals_linear = 1 ./ ν_vals_linear # Convert reluctivity to permeability
 
 # Plot Magnitudes
-p1 = plot(x_int * 1e2, Az_mag_vals * 1e5, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"|A_z(x)|\ \mathrm{[mWb/cm]}", color=:black, lw=1, legend=false, title=L"|A_z|" *" Magnitude")
-p2 = plot(x_int * 1e2, B_mag_vals * 1e3, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"|B_y(x)|\ \mathrm{[mT]}", color=:black, lw=1, legend=false, title=L"|B_y|" *" Magnitude")
-p3 = plot(x_int * 1e2, Jeddy_mag_vals * 1e-4, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"|J_{eddy}(x)|\ \mathrm{[A/cm^2]}", color=:black, lw=1, legend=false, title=L"|J_{eddy}|" *" Magnitude")
-p4 = plot(x_int * 1e2, μ_vals_linear, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"\mu(x)\ \mathrm{[m/H]}", color=:black, lw=1, legend=false, title="Permeability (Linear)")
+p1 = plot(x_int * 1e2, Az_mag_vals * 1e5, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"|A_z(x)|\ \mathrm{[mWb/cm]}", color=:black, lw=1, legend=false, title=L"|A_z|" *" Magnitude", bottom_margin=8mm)
+p2 = plot(x_int * 1e2, B_mag_vals * 1e3, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"|B_y(x)|\ \mathrm{[mT]}", color=:black, lw=1, legend=false, title=L"|B_y|" *" Magnitude", bottom_margin=8mm)
+p3 = plot(x_int * 1e2, Jeddy_mag_vals * 1e-4, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"|J_{eddy}(x)|\ \mathrm{[A/cm^2]}", color=:black, lw=1, legend=false, title=L"|J_{eddy}|" *" Magnitude", bottom_margin=8mm)
+# p4 = plot(x_int * 1e2, μ_vals_linear, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"\mu(x)\ \mathrm{[m/H]}", color=:black, lw=1, legend=false, title="Permeability (Linear)", bottom_margin=8mm)
 
 # Add annotations with improved legibility (electromagnetic plots)
-for p in [p1, p2, p3, p4]
+for p in [p1, p2, p3]
+    # Add background tinting for electromagnetic plots
+    add_region_backgrounds!(p, boundaries_em, region_labels_em, [x_min_em, x_max_em])
+    
     vline!(p, boundaries_em * 1e2, color=:grey, linestyle=:dash, alpha=0.6, label="")
     plot_ylims = Plots.ylims(p)
-    label_y = plot_ylims[1] - 0.10 * (plot_ylims[2] - plot_ylims[1])
-    # Add region labels with better formatting
+    label_y = plot_ylims[1] - 0.2 * (plot_ylims[2] - plot_ylims[1])  # Reduced offset to prevent cutoff
+    
+    # Add region labels with new color scheme
     for i in eachindex(midpoints_em)
-        color = if region_labels_em[i] == "Oil"
-            :blue
-        elseif region_labels_em[i] == "Core"
-            :red
-        elseif occursin("Coil", region_labels_em[i])
-            :orange
-        else
-            :black
-        end
+        color = get_region_color(region_labels_em[i])
         annotate!(p, midpoints_em[i]*1e2, label_y, text(region_labels_em[i], 9, color, :center, :top))
     end
 end
 
-plt_mag = plot(p1, p2, p3, p4, layout=(4,1), size=(800, 1200))
+plt_mag = plot(p1, p2, p3, layout=(3,1), size=(800, 1200), bottom_margin=10mm, left_margin=8mm, right_margin=5mm)
 savefig(plt_mag, joinpath(paths["OUTPUT_DIR"], "magnetodynamics_harmonic_coupled_magnitudes.pdf"))
 display(plt_mag)
 
@@ -380,32 +401,28 @@ anim = @animate for t_step in t_vec
     Jeddy_max = maximum(Jeddy_mag_vals)
 
     # Plot instantaneous real parts at time t
-    p1_t = plot(x_int * 1e2, Az_inst_vals * 1e5, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"A_z(x,t)\ \mathrm{[mWb/cm]}", color=:blue, lw=1, legend=false, title=@sprintf("Time-Harmonic (t = %.2e s)", t_step), ylims=(-Az_max*1.1e5, Az_max*1.1e5))
-    p2_t = plot(x_int * 1e2, By_inst_vals * 1e3, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"B_y(x,t)\ \mathrm{[mT]}", color=:blue, lw=1, legend=false, ylims=(-By_max*1.1e3, By_max*1.1e3))
-    p3_t = plot(x_int * 1e2, Jeddy_inst_vals * 1e-4, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"J_{eddy}(x,t)\ \mathrm{[A/cm^2]}", color=:red, lw=1, legend=false, ylims=(-Jeddy_max*1.1e-4, Jeddy_max*1.1e-4))
-    p4_t = plot(x_int * 1e2, μ_vals_linear, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"\mu(x)\ \mathrm{[m/H]}", color=:black, lw=1, legend=false, title="Permeability (Linear)")
+    p1_t = plot(x_int * 1e2, Az_inst_vals * 1e5, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"A_z(x,t)\ \mathrm{[mWb/cm]}", color=:blue, lw=1, legend=false, title=@sprintf("Time-Harmonic (t = %.2e s)", t_step), ylims=(-Az_max*1.1e5, Az_max*1.1e5), bottom_margin=8mm)
+    p2_t = plot(x_int * 1e2, By_inst_vals * 1e3, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"B_y(x,t)\ \mathrm{[mT]}", color=:blue, lw=1, legend=false, ylims=(-By_max*1.1e3, By_max*1.1e3), bottom_margin=8mm)
+    p3_t = plot(x_int * 1e2, Jeddy_inst_vals * 1e-4, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"J_{eddy}(x,t)\ \mathrm{[A/cm^2]}", color=:red, lw=1, legend=false, ylims=(-Jeddy_max*1.1e-4, Jeddy_max*1.1e-4), bottom_margin=8mm)
+    # p4_t = plot(x_int * 1e2, μ_vals_linear, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"\mu(x)\ \mathrm{[m/H]}", color=:black, lw=1, legend=false, title="Permeability (Linear)")
 
     # Add annotations with improved legibility (electromagnetic animation)
-    for p in [p1_t, p2_t, p3_t, p4_t]
+    for p in [p1_t, p2_t, p3_t]
+        # Add background tinting for animation plots
+        add_region_backgrounds!(p, boundaries_em, region_labels_em, [x_min_em, x_max_em])
+        
         vline!(p, boundaries_em * 1e2, color=:grey, linestyle=:dash, alpha=0.6, label="")
         plot_ylims = Plots.ylims(p)
-        label_y = plot_ylims[1] - 0.10 * (plot_ylims[2] - plot_ylims[1])
-        # Add region labels with better formatting
+        label_y = plot_ylims[1] - 0.2 * (plot_ylims[2] - plot_ylims[1])  # Reduced offset to prevent cutoff
+        
+        # Add region labels with new color scheme
         for i in eachindex(midpoints_em)
-            color = if region_labels_em[i] == "Oil"
-                :blue
-            elseif region_labels_em[i] == "Core"
-                :red
-            elseif occursin("Coil", region_labels_em[i])
-                :orange
-            else
-                :black
-            end
+            color = get_region_color(region_labels_em[i])
             annotate!(p, midpoints_em[i]*1e2, label_y, text(region_labels_em[i], 9, color, :center, :top))
         end
     end
     
-    plot(p1_t, p2_t, p3_t, p4_t, layout=(4,1), size=(800, 1200))
+    plot(p1_t, p2_t, p3_t, layout=(3,1), size=(800, 1200), bottom_margin=10mm, left_margin=8mm, right_margin=5mm)
 end
 
 gif(anim, joinpath(paths["OUTPUT_DIR"], @sprintf("magnetodynamics_harmonic_coupled_animation(f=%.2e).gif", freq)), fps = 15)
