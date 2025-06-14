@@ -155,7 +155,7 @@ end
 
 hysterisis_loss_density = (x) -> 0.0  
 
-
+eddy_loss_vals = [eddy_loss_density(x) for x in coord]
 # Plot the eddy loss density
 eddy_loss_plot = plot(x_int * 1e2, eddy_loss_vals, xlabel="x [cm]", ylabel="Eddy Loss Density [W/m³]", title="Eddy Current Loss Density", color=:blue, lw=1, legend=false)
 savefig(eddy_loss_plot, joinpath(paths["OUTPUT_DIR"], "eddy_loss_density.png"))
