@@ -4,7 +4,7 @@ using  Gmsh: gmsh
 include(joinpath(dirname(dirname(@__FILE__)), "../config.jl"))
 
 # Get paths
-paths = get_project_paths("ta_example_1d")
+paths = get_project_paths("examples")
 
 println("Base directory: ", paths["BASE_DIR"])
 println("Geometry directory: ", paths["GEO_DIR"])
@@ -15,8 +15,8 @@ gmsh.initialize()
 
 
 # Simulation domain
-x0 = -0.5;
-x1 = 0.5;
+x0 = -50.0;
+x1 = 50.0;
 
 # Core dimensions
 a = 100.3e-3;
@@ -24,7 +24,7 @@ b = 73.15e-3;
 c = 27.5e-3;
 
 # Oil reservoirs
-reservoir_width = 2*a-b ;
+reservoir_width = 3 * (2*a-b) ;
 
 # Mesh density
 lc1 = 0.1;    # At x0 and x1

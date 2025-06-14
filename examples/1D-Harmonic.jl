@@ -30,7 +30,7 @@ J0 = 2.2e4       # Source current density [A/m²] (Assumed Real)
 μ0 = 4e-7 * pi  # Vacuum permeability [H/m]
 μr_core = 5000.0 # Relative permeability of the core
 σ_core = 1e7    # Conductivity of the core [S/m]
-freq = 50    # Frequency [Hz]
+freq = 5000    # Frequency [Hz]
 ω = 2 * pi * freq # Angular frequency [rad/s]
 
 # FEM Parameters
@@ -148,125 +148,157 @@ B_vals = B_mag(coord)
 B_peak = maximum(B_vals)
 
 # TODO: fix this with an integral
-eddy_loss_density = (x) -> (π^2 / 6) * Ke * (B_peak^2) * (mt^2) * (freq^2) * (a_len^2/3) / 1e-7
-
-
-boundary_flux_func = tag -> begin
-    if tag == "Boundary"
-        return -10.0  # Heat flux leaving the boundary (negative for outward flux)
-    else
-        return 0.0
-    end
+eddy_loss_density = (x) -> begin
+    B_local = B_mag(VectorValue(x[1])) # Ensure x is properly indexed for evaluation
+    (π^2 / 6) * Ke * (B_local^2) * (mt^2) * (freq^2) * (a_len^2/3) / 1e-7
 end
 
-# Now solve the heat equation using this CellField directly
-T = solve_heatdynamics(
+hysterisis_loss_density = (x) -> 0.0  
+
+
+# Plot the eddy loss density
+eddy_loss_plot = plot(x_int * 1e2, eddy_loss_vals, xlabel="x [cm]", ylabel="Eddy Loss Density [W/m³]", title="Eddy Current Loss Density", color=:blue, lw=1, legend=false)
+savefig(eddy_loss_plot, joinpath(paths["OUTPUT_DIR"], "eddy_loss_density.png"))
+display(eddy_loss_plot)
+
+# Set dissipation coefficient and ambient temperature for the loss region (e.g., air)
+dissipation_coeff = 0.25  # Increase for stronger exponential decay in the loss region
+T_ambient = 273.15 + 20.0 # Ambient temperature in Kelvin (20°C)
+T_ref_K = 273.15 + 110.0 # Reference temperature for AAF calculation
+
+dissipation_func = define_loss_region_dissipation(material_tags, dissipation_coeff; region_tag_name="Air")
+
+# Now solve the heat equation using the dissipation term in the specified region
+T = solve_heatdynamics_with_dissipation(
     model, tags, order, dirichlet_tag, 0.0,
-    eddy_loss_density, heat_conductivity_func
+    eddy_loss_density, heat_conductivity_func,
+    dissipation_func, T_ambient
 )
 
-x_int = collect(range(-0.5, 0.5, length=1000))
+x_int = collect(range(-1.0, 1.0, length=1000))
 coord = [VectorValue(x_) for x_ in x_int]
 
-# For plotting, evaluate at coordinates
-# plot(x_int * 1e2, eddy_loss_density(coord), xlabel="x [cm]", ylabel="Q [W/m³]", title="Eddy Current Loss Density")
+T_vals = T(coord) # T is already in Kelvin
+T_peak = minimum(T_vals)
 
-heat_plot = plot(x_int * 1e2, T(coord), xlabel="x [cm]", ylabel="ΔT [K]", title="Temperature Rise due to Eddy Currents")
+# Define activation energy and gas constant for AAF calculation
+E = 110e3 # Activation energy [J/mol], typical for transformer oil
+R = 8.314 # Gas constant [J/(mol·K)]
+
+# Oil region boundaries (in meters)
+oil_xmin = -0.191175 # Oil region starts at -6.3725 cm
+oil_xmax = -0.05015  # Oil region ends at -5.015 cm
+oil_xmin_r = 0.05015   # Right oil region starts at 5.015 cm
+oil_xmax_r = 0.191175  # Right oil region ends at 19.1175 cm
+
+# Calculate AAF only in oil regions (left and right), NaN elsewhere
+AAF_vals = [(((x[1] ≥ oil_xmin) && (x[1] ≤ oil_xmax)) ||
+             ((x[1] ≥ oil_xmin_r) && (x[1] ≤ oil_xmax_r))) && T_val > 0.0 ?
+             exp(E/R * (1/T_ref_K - 1/T_val)) : NaN
+            for (x, T_val) in zip(coord, T_vals)]
+
+# Plot and save the AAF (aging) plot
+AAF_plot = plot(x_int * 1e2, AAF_vals, xlabel="x [cm]", ylabel="Aging Acceleration Factor",
+     title="Oil Aging Acceleration Factor (Oil Only)", lw=2)
+savefig(AAF_plot, joinpath(paths["OUTPUT_DIR"], "aging_acceleration_factor.png"))
+display(AAF_plot)
+
+# Plot and save the temperature profile
+heat_plot = plot(x_int * 1e2, T_vals, xlabel="x [cm]", ylabel="Temperature [K]", title="Temperature Profile", lw=2)
+savefig(heat_plot, joinpath(paths["OUTPUT_DIR"], "temperature_profile.png"))
 display(heat_plot)
 
-# %% [markdown]
-# ## Visualization (Magnitudes)
+
+# # %% [markdown]
+# # ## Visualization (Magnitudes)
+
+# # %%
+# # Define geometry boundaries for plotting
+# a_len = 100.3e-3; b_len = 73.15e-3; c_len = 27.5e-3
+# xa1 = -a_len/2; xb1 = -b_len/2; xc1 = -c_len/2
+# xc2 = c_len/2; xb2 = b_len/2; xa2 = a_len/2
+# boundaries = [xa1, xb1, xc1, xc2, xb2, xa2]
+
+# # %%
+# # Define points for visualization
+# x_int = collect(range(-0.1, 0.1, length=1000))
+# coord = [VectorValue(x_) for x_ in x_int]
+
+# # Evaluate magnitudes at interpolation points
+# Az_mag_vals = Az_mag(coord)
+# B_mag_vals = B_mag(coord)
+# Jeddy_mag_vals = Jeddy_mag(coord)
+# ν_vals_linear = ν_field_linear(coord) # Evaluate the linear reluctivity field
+# μ_vals_linear = 1 ./ ν_vals_linear # Convert reluctivity to permeability
+
+# # Calculate midpoints for region labels
+# x_min_plot = minimum(x_int); x_max_plot = maximum(x_int)
+# midpoints = [(x_min_plot + xa1)/2, (xa1 + xb1)/2, (xb1 + xc1)/2, (xc1 + xc2)/2, (xc2 + xb2)/2, (xb2 + xa2)/2, (xa2 + x_max_plot)/2]
+# region_labels = ["Air", "Core", "Coil L", "Core", "Coil R", "Core", "Air"]
+
+# # Plot Magnitudes
+# p1 = plot(x_int * 1e2, Az_mag_vals * 1e5, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"|A_z(x)|\ \mathrm{[mWb/cm]}", color=:black, lw=1, legend=false, title=L"|A_z|" *" Magnitude")
+# p2 = plot(x_int * 1e2, B_mag_vals * 1e3, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"|B_y(x)|\ \mathrm{[mT]}", color=:black, lw=1, legend=false, title=L"|B_y|" *" Magnitude")
+# p3 = plot(x_int * 1e2, Jeddy_mag_vals * 1e-4, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"|J_{eddy}(x)|\ \mathrm{[A/cm^2]}", color=:black, lw=1, legend=false, title=L"|J_{eddy}|" *" Magnitude")
+# p4 = plot(x_int * 1e2, μ_vals_linear, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"\mu(x)\ \mathrm{[m/H]}", color=:black, lw=1, legend=false, title="Permeability (Linear)")
+
+# # Add annotations
+# for p in [p1, p2, p3, p4]
+#     vline!(p, boundaries * 1e2, color=:grey, linestyle=:dash, label="")
+#     plot_ylims = Plots.ylims(p)
+#     label_y = plot_ylims[1] - 0.08 * (plot_ylims[2] - plot_ylims[1])
+#     annotate!(p, [(midpoints[i]*1e2, label_y, text(region_labels[i], 8, :center, :top)) for i in eachindex(midpoints)])
+# end
+
+# plt_mag = plot(p1, p2, p3, p4, layout=(4,1), size=(800, 1200))
+# savefig(plt_mag, joinpath(paths["OUTPUT_DIR"], "magnetodynamics_harmonic_coupled_magnitudes.pdf"))
+# display(plt_mag)
+
+# # %% [markdown]
+# # ## Visualization (Animation)
+
+# # %%
+# # Create animation over one period
+# T_period = 1/freq
+# t_vec = range(0, T_period, length=100)
+
+# anim = @animate for t_step in t_vec
+#     # Calculate instantaneous real value: Re( (u+iv) * exp(jωt) ) = u*cos(ωt) - v*sin(ωt)
+#     cos_wt = cos(ω * t_step)
+#     sin_wt = sin(ω * t_step)
+    
+#     Az_inst = u * cos_wt - v * sin_wt
+#     B_re_inst = B_re * cos_wt - B_im * sin_wt # Instantaneous B_re
+#     Jeddy_inst = J_eddy_re * cos_wt - J_eddy_im * sin_wt
+    
+#     # Evaluate at interpolation points
+#     Az_inst_vals = Az_inst(coord)
+#     B_re_inst_vals = B_re_inst(coord)
+#     By_inst_vals = [b[1] for b in B_re_inst_vals] # Extract y-component
+#     Jeddy_inst_vals = Jeddy_inst(coord)
+    
+#     # Get magnitude limits for consistent y-axis scaling
+#     Az_max = maximum(Az_mag_vals)
+#     By_max = maximum(B_mag_vals)
+#     Jeddy_max = maximum(Jeddy_mag_vals)
+
+#     # Plot instantaneous real parts at time t
+#     p1_t = plot(x_int * 1e2, Az_inst_vals * 1e5, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"A_z(x,t)\ \mathrm{[mWb/cm]}", color=:blue, lw=1, legend=false, title=@sprintf("Time-Harmonic (t = %.2e s)", t_step), ylims=(-Az_max*1.1e5, Az_max*1.1e5))
+#     p2_t = plot(x_int * 1e2, By_inst_vals * 1e3, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"B_y(x,t)\ \mathrm{[mT]}", color=:blue, lw=1, legend=false, ylims=(-By_max*1.1e3, By_max*1.1e3))
+#     p3_t = plot(x_int * 1e2, Jeddy_inst_vals * 1e-4, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"J_{eddy}(x,t)\ \mathrm{[A/cm^2]}", color=:red, lw=1, legend=false, ylims=(-Jeddy_max*1.1e-4, Jeddy_max*1.1e-4))
+#     p4_t = plot(x_int * 1e2, μ_vals_linear, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"\mu(x)\ \mathrm{[m/H]}", color=:black, lw=1, legend=false, title="Permeability (Linear)")
+
+#     # Add annotations
+#     for p in [p1_t, p2_t, p3_t, p4_t]
+#         vline!(p, boundaries * 1e2, color=:grey, linestyle=:dash, label="")
+#         plot_ylims = Plots.ylims(p)
+#         label_y = plot_ylims[1] - 0.08 * (plot_ylims[2] - plot_ylims[1])
+#         annotate!(p, [(midpoints[i]*1e2, label_y, text(region_labels[i], 8, :center, :top)) for i in eachindex(midpoints)])
+#     end
+    
+#     plot(p1_t, p2_t, p3_t, p4_t, layout=(4,1), size=(800, 1200))
+# end
+
+# gif(anim, joinpath(paths["OUTPUT_DIR"], @sprintf("magnetodynamics_harmonic_coupled_animation(f=%.2e).gif", freq)), fps = 15)
 
 # %%
-# Define geometry boundaries for plotting
-a_len = 100.3e-3; b_len = 73.15e-3; c_len = 27.5e-3
-xa1 = -a_len/2; xb1 = -b_len/2; xc1 = -c_len/2
-xc2 = c_len/2; xb2 = b_len/2; xa2 = a_len/2
-boundaries = [xa1, xb1, xc1, xc2, xb2, xa2]
-
-# %%
-# Define points for visualization
-x_int = collect(range(-0.1, 0.1, length=1000))
-coord = [VectorValue(x_) for x_ in x_int]
-
-# Evaluate magnitudes at interpolation points
-Az_mag_vals = Az_mag(coord)
-B_mag_vals = B_mag(coord)
-Jeddy_mag_vals = Jeddy_mag(coord)
-ν_vals_linear = ν_field_linear(coord) # Evaluate the linear reluctivity field
-μ_vals_linear = 1 ./ ν_vals_linear # Convert reluctivity to permeability
-
-# Calculate midpoints for region labels
-x_min_plot = minimum(x_int); x_max_plot = maximum(x_int)
-midpoints = [(x_min_plot + xa1)/2, (xa1 + xb1)/2, (xb1 + xc1)/2, (xc1 + xc2)/2, (xc2 + xb2)/2, (xb2 + xa2)/2, (xa2 + x_max_plot)/2]
-region_labels = ["Air", "Core", "Coil L", "Core", "Coil R", "Core", "Air"]
-
-# Plot Magnitudes
-p1 = plot(x_int * 1e2, Az_mag_vals * 1e5, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"|A_z(x)|\ \mathrm{[mWb/cm]}", color=:black, lw=1, legend=false, title=L"|A_z|" *" Magnitude")
-p2 = plot(x_int * 1e2, B_mag_vals * 1e3, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"|B_y(x)|\ \mathrm{[mT]}", color=:black, lw=1, legend=false, title=L"|B_y|" *" Magnitude")
-p3 = plot(x_int * 1e2, Jeddy_mag_vals * 1e-4, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"|J_{eddy}(x)|\ \mathrm{[A/cm^2]}", color=:black, lw=1, legend=false, title=L"|J_{eddy}|" *" Magnitude")
-p4 = plot(x_int * 1e2, μ_vals_linear, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"\mu(x)\ \mathrm{[m/H]}", color=:black, lw=1, legend=false, title="Permeability (Linear)")
-
-# Add annotations
-for p in [p1, p2, p3, p4]
-    vline!(p, boundaries * 1e2, color=:grey, linestyle=:dash, label="")
-    plot_ylims = Plots.ylims(p)
-    label_y = plot_ylims[1] - 0.08 * (plot_ylims[2] - plot_ylims[1])
-    annotate!(p, [(midpoints[i]*1e2, label_y, text(region_labels[i], 8, :center, :top)) for i in eachindex(midpoints)])
-end
-
-plt_mag = plot(p1, p2, p3, p4, layout=(4,1), size=(800, 1200))
-savefig(plt_mag, joinpath(paths["OUTPUT_DIR"], "magnetodynamics_harmonic_coupled_magnitudes.pdf"))
-display(plt_mag)
-
-# %% [markdown]
-# ## Visualization (Animation)
-
-# %%
-# Create animation over one period
-T_period = 1/freq
-t_vec = range(0, T_period, length=100)
-
-anim = @animate for t_step in t_vec
-    # Calculate instantaneous real value: Re( (u+iv) * exp(jωt) ) = u*cos(ωt) - v*sin(ωt)
-    cos_wt = cos(ω * t_step)
-    sin_wt = sin(ω * t_step)
-    
-    Az_inst = u * cos_wt - v * sin_wt
-    B_re_inst = B_re * cos_wt - B_im * sin_wt # Instantaneous B_re
-    Jeddy_inst = J_eddy_re * cos_wt - J_eddy_im * sin_wt
-    
-    # Evaluate at interpolation points
-    Az_inst_vals = Az_inst(coord)
-    B_re_inst_vals = B_re_inst(coord)
-    By_inst_vals = [b[1] for b in B_re_inst_vals] # Extract y-component
-    Jeddy_inst_vals = Jeddy_inst(coord)
-    
-    # Get magnitude limits for consistent y-axis scaling
-    Az_max = maximum(Az_mag_vals)
-    By_max = maximum(B_mag_vals)
-    Jeddy_max = maximum(Jeddy_mag_vals)
-
-    # Plot instantaneous real parts at time t
-    p1_t = plot(x_int * 1e2, Az_inst_vals * 1e5, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"A_z(x,t)\ \mathrm{[mWb/cm]}", color=:blue, lw=1, legend=false, title=@sprintf("Time-Harmonic (t = %.2e s)", t_step), ylims=(-Az_max*1.1e5, Az_max*1.1e5))
-    p2_t = plot(x_int * 1e2, By_inst_vals * 1e3, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"B_y(x,t)\ \mathrm{[mT]}", color=:blue, lw=1, legend=false, ylims=(-By_max*1.1e3, By_max*1.1e3))
-    p3_t = plot(x_int * 1e2, Jeddy_inst_vals * 1e-4, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"J_{eddy}(x,t)\ \mathrm{[A/cm^2]}", color=:red, lw=1, legend=false, ylims=(-Jeddy_max*1.1e-4, Jeddy_max*1.1e-4))
-    p4_t = plot(x_int * 1e2, μ_vals_linear, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"\mu(x)\ \mathrm{[m/H]}", color=:black, lw=1, legend=false, title="Permeability (Linear)")
-
-    # Add annotations
-    for p in [p1_t, p2_t, p3_t, p4_t]
-        vline!(p, boundaries * 1e2, color=:grey, linestyle=:dash, label="")
-        plot_ylims = Plots.ylims(p)
-        label_y = plot_ylims[1] - 0.08 * (plot_ylims[2] - plot_ylims[1])
-        annotate!(p, [(midpoints[i]*1e2, label_y, text(region_labels[i], 8, :center, :top)) for i in eachindex(midpoints)])
-    end
-    
-    plot(p1_t, p2_t, p3_t, p4_t, layout=(4,1), size=(800, 1200))
-end
-
-gif(anim, joinpath(paths["OUTPUT_DIR"], @sprintf("magnetodynamics_harmonic_coupled_animation(f=%.2e).gif", freq)), fps = 15)
-
-# %%
-
-
-

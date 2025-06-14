@@ -31,6 +31,17 @@ function define_heat_source(material_tags, loss_func)
     return heat_source
 end
 
+# Returns a function of tag that is dissipation_coeff in the specified region, 0 elsewhere
+function define_loss_region_dissipation(material_tags::Dict{String, Int}, dissipation_coeff::Float64; region_tag_name="Air")
+    function region_dissipation(tag)
+        if haskey(material_tags, region_tag_name) && tag == material_tags[region_tag_name]
+            return dissipation_coeff
+        else
+            return 0.0
+        end
+    end
+    return region_dissipation
+end
 
 function solve_heatdynamics(
     model, tags, order, dirichlet_tag, dirichlet_value, 
@@ -61,5 +72,25 @@ function solve_heatdynamics(
     # Add ambient temperature back to get actual temperature
     T = θ
 
+    return T
+end
+
+# Extended heat solver with optional dissipation in a specified region
+function solve_heatdynamics_with_dissipation(
+    model, tags, order, dirichlet_tag, dirichlet_value, 
+    loss_func, conductivity_func,
+    dissipation_func, T_ambient
+)
+    Ω = Triangulation(model)
+    dΩ = Measure(Ω, 2*order)
+
+    U = FESpace(model, ReferenceFE(lagrangian, Float64, order), 
+                conformity=:H1)
+    U0 = TrialFESpace(U)
+
+    problem = heat_problem_weak_form_with_dissipation(
+        Ω, dΩ, tags, conductivity_func, loss_func, dissipation_func, T_ambient)
+    θ = solve_fem_problem(problem, U0, U)
+    T = θ
     return T
 end

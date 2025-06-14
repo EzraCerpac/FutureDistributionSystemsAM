@@ -127,23 +127,25 @@ function magnetodynamics_harmonic_coupled_weak_form(
     return WeakFormProblem(a, b)
 end
 
-function heat_problem_weak_form(
+
+function heat_problem_weak_form_with_dissipation(
     Ω::Triangulation, 
     dΩ::Measure, 
     tags::AbstractArray, 
     diffusivity_func::Function, 
-    heat_source::Function
+    heat_source::Function,
+    dissipation_func::Function, # returns dissipation_coeff for a tag, 0 elsewhere
+    T_ambient::Float64
     )
     
     τ = CellField(tags, Ω)
-    k = diffusivity_func ∘ τ  # Thermal conductivity, which must be defined on the mesh using tags
-    
-    # The heat source cannot be defined using tags, as it is a function of the mesh coordinates.
+    k = diffusivity_func ∘ τ  # Thermal conductivity
     Q = heat_source          # Heat source (loss density)
+    α = dissipation_func ∘ τ
 
-    # Modified weak form to ensure non-negative temperature difference
-    a(u,v) = ∫( k * ∇(u) ⋅ ∇(v) )dΩ
-    b(v)   = ∫( Q * v )dΩ
+    # Weak form: add volumetric sink in region: -α*(u-T_ambient)
+    a(u,v) = ∫( k * ∇(u) ⋅ ∇(v) + α * u * v )dΩ
+    b(v)   = ∫( Q * v + α * T_ambient * v )dΩ
 
     return WeakFormProblem(a, b)
 end

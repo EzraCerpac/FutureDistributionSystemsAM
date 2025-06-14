@@ -76,5 +76,6 @@ export define_heat_conductivity
 
 # From heat_solver.jl
 export define_heat_source, solve_heatdynamics
+export define_air_dissipation, solve_heatdynamics_with_dissipation, define_loss_region_dissipation, heat_problem_weak_form_with_dissipation
 
 end
