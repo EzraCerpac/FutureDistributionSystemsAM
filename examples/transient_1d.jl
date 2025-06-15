@@ -44,15 +44,15 @@ dirichlet_bc_func(x::Point, t::Real) = 0.0 # For Gridap internals needing g(x,t)
 
 # --- Transient Simulation Parameters ---
 t0 = 0.0
-periods_to_simulate = 3  # Quick test with 2 periods
+periods_to_simulate = 2  # Quick test with 2 periods
 tF = periods_to_simulate / freq # Simulate for 2 periods
-num_steps_per_period = 20  # Smaller steps for faster testing (250 Hz Nyquist)
-num_periods_collect_fft = 2 # Use last 1 period for FFT
+num_steps_per_period = 80  # Smaller steps for faster testing (250 Hz Nyquist)
+num_periods_collect_fft = 1 # Use last 1 period for FFT
 Δt_val = (1/freq) / num_steps_per_period # Time step size, renamed to Δt_val to avoid conflict with module Δt
 θ_method = 0.5 # Crank-Nicolson (0.5), BE (1.0), FE (0.0)
 
 # Paths
-mesh_file = joinpath(paths["GEO_DIR"], "coil_geo_new.msh")
+mesh_file = joinpath(paths["GEO_DIR"], "coil_geo.msh")
 output_dir = joinpath(paths["OUTPUT_DIR"], "transient_1d_results")
 if !isdir(output_dir)
     mkpath(output_dir)
@@ -151,39 +151,20 @@ solution_transient_iterable, Az0_out, Ω_out, ν_cf_out, σ_cf_out, Js_t_func_ou
 # ## Post-processing and Visualization
 
 # %%
-# Extract signal at probe point
-x_probe = VectorValue(-0.03) 
+# Extract spatially averaged signal across core region
+x_start = xa2  # Left core boundary (≈ -0.05015 m)
+x_end = 0.0    # Center (spans left core + left coil + center core)
 steps_for_fft_start_time = tF - (num_periods_collect_fft / freq)
 
-# Fast signal extraction (skip expensive VTK saving for speed)
-println("Extracting signal at probe point (fast mode)...")
-time_steps_for_fft = Float64[]
-time_signal_data = Float64[]
-
-global step_count = 0
-for (Az_n, tn) in solution_transient_iterable
-    global step_count += 1
-    if tn >= steps_for_fft_start_time
-        push!(time_steps_for_fft, tn)
-        try
-            probe_val = Az_n(x_probe)
-            if isa(probe_val, AbstractArray) && length(probe_val) == 1
-                push!(time_signal_data, first(probe_val))
-            elseif isa(probe_val, Number)
-                push!(time_signal_data, Float64(probe_val))
-            else
-                push!(time_signal_data, NaN)
-            end
-        catch e
-            println("Warning: Could not evaluate at probe point for t=$(tn)")
-            push!(time_signal_data, NaN)
-        end
-    end
-    if step_count % 50 == 0
-        println("Extracted signal from step $(step_count) at t=$(tn)")
-    end
-end
-println("Signal extraction completed for $(length(time_signal_data)) points")
+# Extract spatially averaged signal using new signal processing function
+println("Extracting spatially averaged signal (xa2 to center)...")
+time_steps_for_fft, time_signal_data = MagnetostaticsFEM.extract_spatially_averaged_signal(
+    solution_transient_iterable,
+    x_start,
+    x_end, 
+    steps_for_fft_start_time;
+    num_spatial_points=100
+)
 
 # %%
 # Process extracted signal
@@ -198,7 +179,7 @@ end
 # Plot time signal with improved styling (consistent units with 1D-Harmonic.jl)
 time_plot = plot(time_steps_for_fft, time_signal_data * 1e5, 
     xlabel="Time [s]", ylabel=L"A_z\ \mathrm{[mWb/cm]}", 
-    title="Az at x=$(x_probe[1]) (last $(num_periods_collect_fft) periods)",
+    title="Spatially averaged Az (xa2 to center, last $(num_periods_collect_fft) periods)",
     lw=2, color=:blue, legend=false, bottom_margin=8mm)
 savefig(time_plot, joinpath(output_dir, "transient_1d_signal.pdf"))
 display(time_plot)
@@ -211,10 +192,10 @@ sampling_rate = 1/Δt_val
 fft_frequencies, fft_magnitudes = MagnetostaticsFEM.perform_fft(time_signal_data, sampling_rate)
 
 # Plot FFT with stem plot (vertical stripes) - consistent units with 1D-Harmonic.jl
-max_freq_plot = 250  # Plot up to Nyquist frequency (250 Hz)
+max_freq_plot = 1000  # Plot up to 1000 Hz as requested
 fft_plot = plot(fft_frequencies, fft_magnitudes * 1e5,
     xlabel="Frequency [Hz]", ylabel=L"Magnitude\ \mathrm{[mWb/cm]}",
-    title="FFT Spectrum of Az at x=$(x_probe[1])",
+    title="FFT Spectrum of spatially averaged Az (xa2 to center)",
     xlims=(0, max_freq_plot), seriestype=:sticks, lw=3, color=:blue, legend=false, bottom_margin=8mm)
 savefig(fft_plot, joinpath(output_dir, "transient_1d_fft.png"))
 display(fft_plot)
@@ -223,7 +204,7 @@ if !isempty(fft_magnitudes) && !isempty(fft_frequencies)
     max_magnitude_fft, idx_max = findmax(fft_magnitudes)
     if idx_max <= length(fft_frequencies)
         peak_frequency_fft = fft_frequencies[idx_max]
-        println("FFT Analysis Results for Az at x=$(x_probe[1]):")
+        println("FFT Analysis Results for spatially averaged Az (xa2 to center):")
         println("  - Peak Amplitude (from FFT): $(max_magnitude_fft * 1e5) mWb/cm")
         println("  - Frequency at Peak: $(peak_frequency_fft) Hz")
         

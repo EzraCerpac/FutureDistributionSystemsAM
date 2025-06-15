@@ -31,7 +31,7 @@ using Plots.PlotMeasures
 # %% [markdown]
 # ## Define Parameters and Paths
 # # Paths
-mesh_file = joinpath(paths["GEO_DIR"], "coil_geo_new.msh")
+mesh_file = joinpath(paths["GEO_DIR"], "coil_geo.msh")
 output_dir = joinpath(paths["OUTPUT_DIR"], "transient_1d_nonlinear_results")
 if !isdir(output_dir)
     mkpath(output_dir)
@@ -39,7 +39,7 @@ end
 
 # %%
 # Model Parameters (enhanced for nonlinear behavior)
-J0_amplitude = 5.16e4   # Fine-tuned current density for ~35 mWb/cm amplitude with nonlinear effects [A/m²]
+J0_amplitude = 2.2e4   # Fine-tuned current density for ~35 mWb/cm amplitude with nonlinear effects [A/m²]
 μ0 = 4e-7 * pi     # Vacuum permeability [H/m]
 μr_core = 5000.0    # Initial relative permeability of the core
 σ_core = 1e7       # Conductivity of the core [S/m]
@@ -89,9 +89,9 @@ dirichlet_bc_func(x::Point, t::Real) = 0.0 # For Gridap internals needing g(x,t)
 
 # --- Transient Simulation Parameters ---
 t0 = 0.0
-periods_to_simulate = 1  # Quick test with 2 periods
+periods_to_simulate = 2  # Quick test with 2 periods
 tF = periods_to_simulate / freq # Simulate for 2 periods
-num_steps_per_period = 20  # Smaller steps for faster testing (250 Hz Nyquist)
+num_steps_per_period = 80  # Smaller steps for faster testing (250 Hz Nyquist)
 num_periods_collect_fft = 1 # Use last 1 period for FFT
 Δt_val = (1 / freq) / num_steps_per_period # Time step size, renamed to Δt_val to avoid conflict with module Δt
 θ_method = 0.5 # Crank-Nicolson (0.5), BE (1.0), FE (0.0)
@@ -196,73 +196,31 @@ println("✓ Solver completed successfully!")
 # ## Post-processing and Visualization
 
 # %%
-# Extract signal at probe point
-x_probe = VectorValue(-0.03)
-# x_probe = VectorValue(xb1-.01)
+# Extract spatially averaged signal across core region
+x_start = xa2  # Left core boundary (≈ -0.05015 m)
+x_end = 0.0    # Center (spans left core + left coil + center core)
 steps_for_fft_start_time = tF - (num_periods_collect_fft / freq)
 
-# Fast signal extraction (skip expensive VTK saving for speed)
-println("Extracting signal at probe point (fast mode)...")
-time_steps_for_fft = Float64[]
-time_signal_data = Float64[]
-
-global step_count = 0
-max_az_overall = 0.0
-max_b_overall = 0.0
-for (Az_n, tn) in solution_transient_iterable
-    global step_count += 1
-
-    # Debug: Monitor field values every few steps
-    if step_count % 5 == 0
-        # Sample B field at probe point to monitor saturation
-        try
-            B_field = calculate_b_field(Az_n)
-            B_probe = B_field(x_probe)
-            B_magnitude = norm(B_probe)
-            global max_b_overall = max(max_b_overall, B_magnitude)
-
-            # Calculate corresponding permeability
-            μr_at_probe = 1 / (bh_a + (1 - bh_a) * B_magnitude^(2 * bh_b) / (B_magnitude^(2 * bh_b) + bh_c))
-
-            if step_count % 10 == 0
-                println("Step $(step_count), t=$(round(tn, digits=5)): B=$(round(B_magnitude, digits=3)) T, μr=$(round(μr_at_probe, digits=1))")
-            end
-        catch e
-            # Skip if calculation fails
-        end
-    end
-
-    if tn >= steps_for_fft_start_time
-        push!(time_steps_for_fft, tn)
-        try
-            probe_val = Az_n(x_probe)
-            if isa(probe_val, AbstractArray) && length(probe_val) == 1
-                az_val = first(probe_val)
-                push!(time_signal_data, az_val)
-                global max_az_overall = max(max_az_overall, abs(az_val))
-            elseif isa(probe_val, Number)
-                az_val = Float64(probe_val)
-                push!(time_signal_data, az_val)
-                global max_az_overall = max(max_az_overall, abs(az_val))
-            else
-                push!(time_signal_data, NaN)
-            end
-        catch e
-            println("Warning: Could not evaluate at probe point for t=$(tn)")
-            push!(time_signal_data, NaN)
-        end
-    end
-    if step_count % 20 == 0
-        println("Extracted signal from step $(step_count) at t=$(tn)")
-    end
-end
+# Extract spatially averaged signal using new signal processing function
+println("Extracting spatially averaged signal (xa2 to center)...")
+time_steps_for_fft, time_signal_data = MagnetostaticsFEM.extract_spatially_averaged_signal(
+    solution_transient_iterable,
+    x_start,
+    x_end, 
+    steps_for_fft_start_time;
+    num_spatial_points=100
+)
 
 # Debug: Print field statistics
-println("=== Field Statistics ===")
-println("  Max |Az| overall: $(max_az_overall * 1e5) mWb/cm")
-println("  Max |B| overall: $(max_b_overall) T")
-println("  Target Az amplitude: 35 mWb/cm")
-println("Signal extraction completed for $(length(time_signal_data)) points")
+if !isempty(time_signal_data)
+    max_az_overall = maximum(abs.(time_signal_data))
+    println("=== Field Statistics ===")
+    println("  Max |Az| overall: $(max_az_overall * 1e5) mWb/cm")
+    println("  Target Az amplitude: 35 mWb/cm")
+    println("Signal extraction completed for $(length(time_signal_data)) points")
+else
+    println("Warning: No signal data extracted")
+end
 
 # %%
 # Process extracted signal
@@ -277,7 +235,7 @@ end
 # Plot time signal with improved styling (consistent units with 1D-Harmonic.jl)
 time_plot = plot(time_steps_for_fft, time_signal_data * 1e5,
     xlabel="Time [s]", ylabel=L"A_z\ \mathrm{[mWb/cm]}",
-    title="Az (Nonlinear) at x=$(x_probe[1]) (last $(num_periods_collect_fft) periods)",
+    title="Spatially averaged Az (Nonlinear, xa2 to center, last $(num_periods_collect_fft) periods)",
     lw=2, color=:blue, legend=false, bottom_margin=8mm)
 savefig(time_plot, joinpath(output_dir, "transient_1d_nonlinear_signal.png"))
 display(time_plot)
@@ -290,10 +248,10 @@ sampling_rate = 1 / Δt_val
 fft_frequencies, fft_magnitudes = MagnetostaticsFEM.perform_fft(time_signal_data, sampling_rate)
 
 # Plot FFT with stem plot (vertical stripes) - consistent units with 1D-Harmonic.jl
-max_freq_plot = 250  # Plot up to Nyquist frequency (250 Hz)
+max_freq_plot = 1000  # Plot up to 1000 Hz as requested
 fft_plot = plot(fft_frequencies, fft_magnitudes * 1e5,
     xlabel="Frequency [Hz]", ylabel=L"Magnitude\ \mathrm{[mWb/cm]}",
-    title="FFT Spectrum of Az (Nonlinear) at x=$(x_probe[1])",
+    title="FFT Spectrum of spatially averaged Az (Nonlinear, xa2 to center)",
     xlims=(0, max_freq_plot), seriestype=:sticks, lw=3, color=:blue, legend=false, bottom_margin=8mm)
 savefig(fft_plot, joinpath(output_dir, "transient_1d_nonlinear_fft.png"))
 display(fft_plot)
@@ -303,7 +261,7 @@ if !isempty(fft_magnitudes) && !isempty(fft_frequencies)
     if idx_max <= length(fft_frequencies)
         peak_frequency_fft = fft_frequencies[idx_max]
         println("=== FFT Analysis Results ===")
-        println("FFT Analysis Results for Az (Nonlinear) at x=$(x_probe[1]):")
+        println("FFT Analysis Results for spatially averaged Az (Nonlinear, xa2 to center):")
         println("  - Peak Amplitude (from FFT): $(max_magnitude_fft * 1e5) mWb/cm")
         println("  - Target Amplitude: 35 mWb/cm")
         println("  - Amplitude Ratio (current/target): $(round(max_magnitude_fft * 1e5 / 35, digits=2))")
