@@ -155,7 +155,7 @@ function prepare_and_solve_transient_1d(
     spatial_js_profile_func = define_current_density(material_tags_dict, J0_amplitude)
     # Js_t_func now uses the dirichlet_bc_function style for consistency if needed,
     # though for current it's Js_t_func(t)(x)
-    Js_t_func(t) = x -> spatial_js_profile_func(cell_tags_cf(x)) * sin(ω_source * t)
+    Js_t_func(t) = x -> spatial_js_profile_func(cell_tags_cf(x)) * cos(ω_source * t)
 
     println("Setting up transient FE spaces...")
     reffe = ReferenceFE(lagrangian, Float64, order_fem)
