@@ -44,10 +44,10 @@ dirichlet_bc_func(x::Point, t::Real) = 0.0 # For Gridap internals needing g(x,t)
 
 # --- Transient Simulation Parameters ---
 t0 = 0.0
-periods_to_simulate = 5  # More periods for better frequency resolution
-tF = periods_to_simulate / freq # Simulate for 5 periods
-num_steps_per_period = 40  # Higher sampling rate to reach 1000 Hz (Nyquist = 1000 Hz needs 2000 Hz sampling)
-num_periods_collect_fft = 3 # Use last N periods for FFT to avoid initial transient effects
+periods_to_simulate = 3  # Quick test with 2 periods
+tF = periods_to_simulate / freq # Simulate for 2 periods
+num_steps_per_period = 20  # Smaller steps for faster testing (250 Hz Nyquist)
+num_periods_collect_fft = 2 # Use last 1 period for FFT
 Δt_val = (1/freq) / num_steps_per_period # Time step size, renamed to Δt_val to avoid conflict with module Δt
 θ_method = 0.5 # Crank-Nicolson (0.5), BE (1.0), FE (0.0)
 
@@ -57,8 +57,8 @@ output_dir = joinpath(paths["OUTPUT_DIR"], "transient_1d_results")
 if !isdir(output_dir)
     mkpath(output_dir)
 end
-fft_plot_path = joinpath(output_dir, "transient_1d_fft.pdf")
-time_signal_plot_path = joinpath(output_dir, "transient_1d_signal.pdf")
+fft_plot_path = joinpath(output_dir, "transient_1d_fft.png")
+time_signal_plot_path = joinpath(output_dir, "transient_1d_signal.png")
 
 println("Mesh file: ", mesh_file)
 println("Output directory: ", output_dir)
@@ -211,12 +211,12 @@ sampling_rate = 1/Δt_val
 fft_frequencies, fft_magnitudes = MagnetostaticsFEM.perform_fft(time_signal_data, sampling_rate)
 
 # Plot FFT with stem plot (vertical stripes) - consistent units with 1D-Harmonic.jl
-max_freq_plot = 1000  # Plot up to 1000 Hz as requested
+max_freq_plot = 250  # Plot up to Nyquist frequency (250 Hz)
 fft_plot = plot(fft_frequencies, fft_magnitudes * 1e5,
     xlabel="Frequency [Hz]", ylabel=L"Magnitude\ \mathrm{[mWb/cm]}",
     title="FFT Spectrum of Az at x=$(x_probe[1])",
     xlims=(0, max_freq_plot), seriestype=:sticks, lw=3, color=:blue, legend=false, bottom_margin=8mm)
-savefig(fft_plot, joinpath(output_dir, "transient_1d_fft.pdf"))
+savefig(fft_plot, joinpath(output_dir, "transient_1d_fft.png"))
 display(fft_plot)
 
 if !isempty(fft_magnitudes) && !isempty(fft_frequencies)
@@ -292,7 +292,7 @@ let solution_collection = collect(solution_transient_iterable)
         
         plt_transient = plot(p1, p2, layout=(2,1), size=(800, 600), 
                             bottom_margin=10mm, left_margin=5mm, right_margin=5mm)
-        savefig(plt_transient, joinpath(output_dir, "transient_1d_fields_annotated.pdf"))
+        savefig(plt_transient, joinpath(output_dir, "transient_1d_fields_annotated.png"))
         display(plt_transient)
     else
         println("Not enough time steps for field visualization")

@@ -60,7 +60,7 @@ export setup_transient_operator, solve_transient_problem, prepare_and_solve_tran
 
 # From nonlinear_solver.jl  
 export solve_nonlinear_magnetodynamics, calculate_reluctivity_cellfield, calculate_b_field_magnitude
-export solve_nonlinear_transient_magnetodynamics
+export solve_nonlinear_transient_magnetodynamics, solve_nonlinear_transient_magnetodynamics_optimized
 
 # For Gridap v0.17, ThetaMethod is likely from Gridap.ODEs.ODETools
 export ThetaMethod # Now imported from Gridap.ODEs.ODETools
