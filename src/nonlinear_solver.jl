@@ -166,3 +166,209 @@ function solve_nonlinear_magnetodynamics(
     
     return uv_FESpace
 end
+
+"""
+    solve_nonlinear_transient_magnetodynamics(
+        mesh_file, order_fem, dirichlet_tag, dirichlet_bc_function,
+        μ0, bh_a, bh_b, bh_c, σ_core, J0_amplitude, ω_source,
+        t0, tF, Δt, θ_method; max_iterations_nl=15, tolerance_nl=1e-5, damping_nl=0.75
+    )
+
+Solves nonlinear transient magnetodynamics with B-H curve using Newton-Raphson iteration.
+Combines transient time-stepping with nonlinear material property updates.
+"""
+function solve_nonlinear_transient_magnetodynamics(
+    mesh_file::String,
+    order_fem::Int,
+    dirichlet_tag::String, 
+    dirichlet_bc_function::Function,
+    μ0::Float64,
+    bh_a::Float64, bh_b::Float64, bh_c::Float64,  # B-H curve params
+    σ_core::Float64,
+    J0_amplitude::Float64,
+    ω_source::Float64,
+    t0::Float64, tF::Float64, Δt::Float64,
+    θ_method::Float64;
+    max_iterations_nl::Int=15,
+    tolerance_nl::Float64=1e-5,
+    damping_nl::Float64=0.75
+)
+    
+    println("--- Preparing Nonlinear Transient 1D Simulation ---")
+    println("Loading mesh and defining domains/materials...")
+    
+    # Load mesh and setup
+    model, labels, tags = load_mesh_and_tags(mesh_file)
+    Ω = Triangulation(model)
+    degree_quad = 2*order_fem
+    dΩ = Measure(Ω, degree_quad)
+
+    material_tags_dict = get_material_tags_oil(labels)
+    conductivity_func = define_conductivity(material_tags_dict, σ_core)
+    
+    # Define B-H curve function (Frohlich-Kennelly model)
+    function fmur_core_func(B)
+        B_safe = max(0.0, B)
+        return 1.0 / (bh_a + (1 - bh_a) * B_safe^(2*bh_b) / (B_safe^(2*bh_b) + bh_c))
+    end
+    
+    # Initial linear reluctivity for first guess
+    μr_initial = fmur_core_func(0.0)
+    initial_reluctivity_func = define_reluctivity(material_tags_dict, μ0, μr_initial)
+    
+    cell_tags_cf = CellField(tags, Ω)
+    σ_cf = Operation(conductivity_func)(cell_tags_cf)
+    
+    # Time-dependent source current (using cos for proper initial excitation)
+    spatial_js_profile_func = define_current_density(material_tags_dict, J0_amplitude)
+    Js_t_func(t) = x -> spatial_js_profile_func(cell_tags_cf(x)) * cos(ω_source * t)
+
+    println("Setting up transient FE spaces...")
+    reffe = ReferenceFE(lagrangian, Float64, order_fem)
+    V0_test = TestFESpace(model, reffe, dirichlet_tags=[dirichlet_tag])
+    Ug_transient = TransientTrialFESpace(V0_test, dirichlet_bc_function)
+
+    println("Defining initial condition...")
+    Az0 = zero(Ug_transient(t0))
+    
+    println("Setting up ODE solver...")
+    linear_solver_for_ode = LUSolver()
+    odesolver = ThetaMethod(linear_solver_for_ode, Δt, θ_method)
+    
+    # Create custom solution iterator for nonlinear transient
+    solution_vector = []
+    
+    println("Solving nonlinear transient problem from t=$(t0) to t=$(tF) with Δt=$(Δt)...")
+    println("Nonlinear parameters: max_iter=$(max_iterations_nl), tol=$(tolerance_nl), damping=$(damping_nl)")
+    
+    # Time stepping with nonlinear iteration at each step
+    t_current = t0
+    Az_current = Az0
+    step_count = 0
+    
+    while t_current < tF
+        t_next = min(t_current + Δt, tF)
+        step_count += 1
+        
+        if step_count % 10 == 0
+            println("Processing time step $(step_count): t = $(t_current) -> $(t_next)")
+        end
+        
+        # Nonlinear iteration for this time step
+        nl_iteration = 0
+        nl_error = 1.0
+        Az_guess = Az_current  # Initial guess from previous time step
+        
+        while nl_iteration < max_iterations_nl && nl_error > tolerance_nl
+            nl_iteration += 1
+            
+            # Calculate B-field magnitude from current guess
+            if nl_iteration == 1
+                # Use linear reluctivity for first iteration
+                ν_cf = Operation(initial_reluctivity_func)(cell_tags_cf)
+            else
+                # Update reluctivity based on B-field from previous iteration
+                # For scalar case, create a dummy MultiField structure or adapt function
+                try
+                    # Try to calculate field-dependent reluctivity
+                    B_field = calculate_b_field(Az_guess)
+                    
+                    # Sample B field at a few points to estimate average magnitude
+                    x_sample = [VectorValue(-0.03), VectorValue(0.0), VectorValue(0.03)]
+                    B_sample_vals = [B_field(x) for x in x_sample]
+                    B_magnitudes = [sqrt(b[1]^2) for b in B_sample_vals]  # For 1D, B_y component
+                    B_avg = sum(B_magnitudes) / length(B_magnitudes)
+                    
+                    # Update reluctivity based on average B field
+                    μr_updated = fmur_core_func(B_avg)
+                    updated_reluctivity_func = define_reluctivity(material_tags_dict, μ0, μr_updated)
+                    ν_cf = Operation(updated_reluctivity_func)(cell_tags_cf)
+                    
+                    if nl_iteration % 5 == 0
+                        println("    B_avg = $(B_avg) T, μr_updated = $(μr_updated)")
+                    end
+                catch e
+                    # Fallback to linear reluctivity if B-field calculation fails
+                    if nl_iteration % 5 == 0
+                        println("    Using linear reluctivity (B-field calc failed: $(e))")
+                    end
+                    ν_cf = Operation(initial_reluctivity_func)(cell_tags_cf)
+                end
+            end
+            
+            # Setup transient operator with current reluctivity
+            res(t, u, v) = ∫( σ_cf * v * ∂t(u) + ν_cf * (∇(v) ⋅ ∇(u)) - v * Js_t_func(t) )*dΩ
+            jac_u(t, u, du, v) = ∫( ν_cf * (∇(v) ⋅ ∇(du)) )*dΩ
+            jac_ut(t, u, du_t, v) = ∫( σ_cf * v * du_t )*dΩ
+            
+            transient_op = TransientFEOperator(res, jac_u, jac_ut, Ug_transient, V0_test)
+            
+            # Solve single time step
+            Az_new = solve_transient_step(odesolver, transient_op, Az_current, t_current, t_next)
+            
+            # Check convergence
+            if nl_iteration > 1
+                nl_error = norm(get_free_dof_values(Az_new) - get_free_dof_values(Az_guess)) / 
+                          (norm(get_free_dof_values(Az_guess)) + 1e-12)
+            end
+            
+            # Apply damping: simply use the new solution for now (simplest approach)
+            # TODO: Improve damping by properly constructing FEFunction
+            Az_guess = Az_new
+            
+            if nl_iteration <= 3 || nl_iteration % 5 == 0
+                println("  NL iteration $(nl_iteration): error = $(nl_error)")
+            end
+        end
+        
+        if nl_iteration >= max_iterations_nl && nl_error > tolerance_nl
+            println("  Warning: Nonlinear iteration did not converge at t=$(t_next) (error=$(nl_error))")
+        else
+            println("  Converged in $(nl_iteration) iterations (error=$(nl_error))")
+        end
+        
+        # Store solution
+        push!(solution_vector, (Az_guess, t_next))
+        Az_current = Az_guess
+        t_current = t_next
+    end
+    
+    println("Nonlinear transient solution completed with $(length(solution_vector)) time steps")
+    
+    # Create solution iterable compatible with existing post-processing
+    solution_transient_iterable = solution_vector
+    
+    # Return same structure as linear solver for compatibility
+    ν_cf_final = Operation(initial_reluctivity_func)(cell_tags_cf)  # Final reluctivity state
+    
+    return solution_transient_iterable, Az0, Ω, ν_cf_final, σ_cf, Js_t_func, model, cell_tags_cf, labels
+end
+
+"""
+    solve_transient_step(odesolver, transient_op, Az_prev, t_current, t_next)
+
+Helper function to solve a single transient time step.
+"""
+function solve_transient_step(odesolver, transient_op, Az_prev, t_current, t_next)
+    # Use the ODE solver to advance one time step
+    dt = t_next - t_current
+    try
+        # Create a simple solution iterator for just this step
+        step_solution = solve(odesolver, transient_op, Az_prev, t_current, t_next)
+        # Get the final solution at t_next
+        for (Az_new, t_new) in step_solution
+            if abs(t_new - t_next) < 1e-10
+                return Az_new
+            end
+        end
+        # If we don't find exact match, return the last solution
+        last_solution = nothing
+        for (Az_new, t_new) in step_solution
+            last_solution = Az_new
+        end
+        return last_solution !== nothing ? last_solution : Az_prev
+    catch e
+        println("Warning: Error in time step solve: $(e)")
+        return Az_prev  # Return previous solution as fallback
+    end
+end

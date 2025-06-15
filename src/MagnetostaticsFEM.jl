@@ -37,6 +37,7 @@ include("heat_solver.jl")        # New for heat dynamics
 
 # From problem_definition.jl
 export define_reluctivity, define_conductivity, define_current_density, get_material_tags, get_material_tags_oil
+export define_nonlinear_reluctivity, update_reluctivity_from_field
 
 # From problems.jl
 export setup_fe_spaces, magnetostatics_weak_form, magnetodynamics_harmonic_coupled_weak_form
@@ -56,6 +57,10 @@ export load_mesh_and_tags
 # From transient_solver.jl
 using .TransientSolver # This module uses qualified names internally like TransientFETools.TypeName
 export setup_transient_operator, solve_transient_problem, prepare_and_solve_transient_1d
+
+# From nonlinear_solver.jl  
+export solve_nonlinear_magnetodynamics, calculate_reluctivity_cellfield, calculate_b_field_magnitude
+export solve_nonlinear_transient_magnetodynamics
 
 # For Gridap v0.17, ThetaMethod is likely from Gridap.ODEs.ODETools
 export ThetaMethod # Now imported from Gridap.ODEs.ODETools

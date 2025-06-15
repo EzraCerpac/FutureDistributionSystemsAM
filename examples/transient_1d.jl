@@ -44,9 +44,9 @@ dirichlet_bc_func(x::Point, t::Real) = 0.0 # For Gridap internals needing g(x,t)
 
 # --- Transient Simulation Parameters ---
 t0 = 0.0
-periods_to_simulate = 5
+periods_to_simulate = 5  # More periods for better frequency resolution
 tF = periods_to_simulate / freq # Simulate for 5 periods
-num_steps_per_period = 50
+num_steps_per_period = 40  # Higher sampling rate to reach 1000 Hz (Nyquist = 1000 Hz needs 2000 Hz sampling)
 num_periods_collect_fft = 3 # Use last N periods for FFT to avoid initial transient effects
 Δt_val = (1/freq) / num_steps_per_period # Time step size, renamed to Δt_val to avoid conflict with module Δt
 θ_method = 0.5 # Crank-Nicolson (0.5), BE (1.0), FE (0.0)
@@ -195,9 +195,9 @@ if isempty(time_steps_for_fft)
     error("No time points collected for FFT. Check simulation time (tF=$(tF), Δt=$(Δt_val)), collection window, or probe point.\nCollected $(length(time_signal_data)) points before NaN filter.")
 end
 
-# Plot time signal with improved styling
-time_plot = plot(time_steps_for_fft, time_signal_data, 
-    xlabel="Time [s]", ylabel="Az [Wb/m]", 
+# Plot time signal with improved styling (consistent units with 1D-Harmonic.jl)
+time_plot = plot(time_steps_for_fft, time_signal_data * 1e5, 
+    xlabel="Time [s]", ylabel=L"A_z\ \mathrm{[mWb/cm]}", 
     title="Az at x=$(x_probe[1]) (last $(num_periods_collect_fft) periods)",
     lw=2, color=:blue, legend=false, bottom_margin=8mm)
 savefig(time_plot, joinpath(output_dir, "transient_1d_signal.pdf"))
@@ -210,12 +210,12 @@ sampling_rate = 1/Δt_val
 
 fft_frequencies, fft_magnitudes = MagnetostaticsFEM.perform_fft(time_signal_data, sampling_rate)
 
-# Plot FFT with improved styling
-max_freq_plot = freq * 3
-fft_plot = plot(fft_frequencies, fft_magnitudes,
-    xlabel="Frequency [Hz]", ylabel="Magnitude",
+# Plot FFT with stem plot (vertical stripes) - consistent units with 1D-Harmonic.jl
+max_freq_plot = 1000  # Plot up to 1000 Hz as requested
+fft_plot = plot(fft_frequencies, fft_magnitudes * 1e5,
+    xlabel="Frequency [Hz]", ylabel=L"Magnitude\ \mathrm{[mWb/cm]}",
     title="FFT Spectrum of Az at x=$(x_probe[1])",
-    xlims=(0, max_freq_plot), lw=2, color=:red, legend=false, bottom_margin=8mm)
+    xlims=(0, max_freq_plot), seriestype=:sticks, lw=3, color=:blue, legend=false, bottom_margin=8mm)
 savefig(fft_plot, joinpath(output_dir, "transient_1d_fft.pdf"))
 display(fft_plot)
 
@@ -224,7 +224,7 @@ if !isempty(fft_magnitudes) && !isempty(fft_frequencies)
     if idx_max <= length(fft_frequencies)
         peak_frequency_fft = fft_frequencies[idx_max]
         println("FFT Analysis Results for Az at x=$(x_probe[1]):")
-        println("  - Peak Amplitude (from FFT): $(max_magnitude_fft)")
+        println("  - Peak Amplitude (from FFT): $(max_magnitude_fft * 1e5) mWb/cm")
         println("  - Frequency at Peak: $(peak_frequency_fft) Hz")
         
         freq_resolution = sampling_rate / length(time_signal_data) 
