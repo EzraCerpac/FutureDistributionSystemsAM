@@ -44,16 +44,16 @@ dirichlet_bc_func(x::Point, t::Real) = 0.0 # For Gridap internals needing g(x,t)
 
 # --- Transient Simulation Parameters ---
 t0 = 0.0
-periods_to_simulate = 2  # Quick test with 2 periods
-tF = periods_to_simulate / freq # Simulate for 2 periods
-num_steps_per_period = 80  # Smaller steps for faster testing (250 Hz Nyquist)
-num_periods_collect_fft = 1 # Use last 1 period for FFT
+periods_to_simulate = 10  # Quick test with 10 periods
+tF = periods_to_simulate / freq # Simulate for 10 periods
+num_steps_per_period = 100  # Smaller steps for faster testing (250 Hz Nyquist)
+num_periods_collect_fft = 5 # Use last 1 period for FFT
 Δt_val = (1/freq) / num_steps_per_period # Time step size, renamed to Δt_val to avoid conflict with module Δt
 θ_method = 0.5 # Crank-Nicolson (0.5), BE (1.0), FE (0.0)
 
 # Paths
 mesh_file = joinpath(paths["GEO_DIR"], "coil_geo.msh")
-output_dir = joinpath(paths["OUTPUT_DIR"], "transient_1d_results")
+output_dir = joinpath(paths["FIGURES_DIR"], "transient_results")
 if !isdir(output_dir)
     mkpath(output_dir)
 end
@@ -151,74 +151,178 @@ solution_transient_iterable, Az0_out, Ω_out, ν_cf_out, σ_cf_out, Js_t_func_ou
 # ## Post-processing and Visualization
 
 # %%
-# Extract spatially averaged signal across core region
-x_start = xa2  # Left core boundary (≈ -0.05015 m)
-x_end = 0.0    # Center (spans left core + left coil + center core)
+# Multi-probe FFT analysis with averaging and individual probe plots
 steps_for_fft_start_time = tF - (num_periods_collect_fft / freq)
-
-# Extract spatially averaged signal using new signal processing function
-println("Extracting spatially averaged signal (xa2 to center)...")
-time_steps_for_fft, time_signal_data = MagnetostaticsFEM.extract_spatially_averaged_signal(
-    solution_transient_iterable,
-    x_start,
-    x_end, 
-    steps_for_fft_start_time;
-    num_spatial_points=100
-)
-
-# %%
-# Process extracted signal
-valid_indices = .!isnan.(time_signal_data)
-time_steps_for_fft = time_steps_for_fft[valid_indices]
-time_signal_data = time_signal_data[valid_indices]
-
-if isempty(time_steps_for_fft)
-    error("No time points collected for FFT. Check simulation time (tF=$(tF), Δt=$(Δt_val)), collection window, or probe point.\nCollected $(length(time_signal_data)) points before NaN filter.")
-end
-
-# Plot time signal with improved styling (consistent units with 1D-Harmonic.jl)
-time_plot = plot(time_steps_for_fft, time_signal_data * 1e5, 
-    xlabel="Time [s]", ylabel=L"A_z\ \mathrm{[mWb/cm]}", 
-    title="Spatially averaged Az (xa2 to center, last $(num_periods_collect_fft) periods)",
-    lw=2, color=:blue, legend=false, bottom_margin=8mm)
-savefig(time_plot, joinpath(output_dir, "transient_1d_signal.pdf"))
-display(time_plot)
-
-# %%
-# FFT Analysis
-println("Performing FFT analysis...")
 sampling_rate = 1/Δt_val
 
-fft_frequencies, fft_magnitudes = MagnetostaticsFEM.perform_fft(time_signal_data, sampling_rate)
+# Define probe points
+offset = 0.01
+probe_x_03 = VectorValue(-0.03)           # Individual probe at x = -0.03 m
+probe_xb1_minus_01 = VectorValue(xb1 - offset)  # Individual probe at x = xb1 - 0.001 m
 
-# Plot FFT with stem plot (vertical stripes) - consistent units with 1D-Harmonic.jl
-max_freq_plot = 1000  # Plot up to 1000 Hz as requested
-fft_plot = plot(fft_frequencies, fft_magnitudes * 1e5,
+# Define multiple probe points for averaging (from xa2 to center)
+num_averaging_probes = 51
+x_coords_averaging = collect(range(xa2, xb1 - offset, length=num_averaging_probes))
+probe_points_averaging = [VectorValue(x) for x in x_coords_averaging]
+
+# All probe points (for extraction)
+all_probe_points = [probe_x_03, probe_xb1_minus_01]
+append!(all_probe_points, probe_points_averaging)
+
+println("Multi-probe FFT setup:")
+println("  - Individual probe 1: x = $(probe_x_03[1]) m")
+println("  - Individual probe 2: x = $(probe_xb1_minus_01[1]) m")
+println("  - Averaging probes: $(num_averaging_probes) points from $(xa2) to 0.0 m")
+
+# Compute multi-probe FFT with individual results and time series
+frequencies, averaged_fft_magnitudes, individual_fft_results, time_series_data = MagnetostaticsFEM.compute_multi_probe_fft_average(
+    solution_transient_iterable,
+    all_probe_points,
+    steps_for_fft_start_time,
+    sampling_rate;
+    return_individual_ffts=true,
+    return_time_series=true
+)
+
+# Plot individual FFT at x = -0.03 m
+if haskey(individual_fft_results, 1)  # First probe is x = -0.03
+    freq_1, mag_1 = individual_fft_results[1]
+    max_freq_plot = 1000
+    
+    fft_plot_x03 = plot(freq_1, mag_1 * 1e5,
+        xlabel="Frequency [Hz]", ylabel=L"Magnitude\ \mathrm{[mWb/cm]}",
+        title="FFT Spectrum at x = -0.03 m",
+        xlims=(0, max_freq_plot), seriestype=:sticks, lw=3, color=:red, legend=false, bottom_margin=8mm)
+    savefig(fft_plot_x03, joinpath(output_dir, "transient_1d_fft_x_minus_0p03.png"))
+    display(fft_plot_x03)
+    
+    # Analysis for x = -0.03 probe
+    max_mag_1, idx_max_1 = findmax(mag_1)
+    if idx_max_1 <= length(freq_1)
+        peak_freq_1 = freq_1[idx_max_1]
+        println("FFT Analysis Results at x = -0.03 m:")
+        println("  - Peak Amplitude: $(max_mag_1 * 1e5) mWb/cm")
+        println("  - Peak Frequency: $(peak_freq_1) Hz")
+    end
+end
+
+# Plot time signal at x = -0.03 m
+if haskey(time_series_data, 1)  # First probe is x = -0.03
+    times_1, signal_1 = time_series_data[1]
+    
+    time_plot_x03 = plot(times_1, signal_1 * 1e5,
+        xlabel="Time [s]", ylabel=L"A_z\ \mathrm{[mWb/cm]}",
+        title="Time Signal at x = -0.03 m",
+        lw=2, color=:red, legend=false, bottom_margin=8mm)
+    savefig(time_plot_x03, joinpath(output_dir, "transient_1d_time_signal_x_minus_0p03.png"))
+    display(time_plot_x03)
+    
+    # Print signal statistics
+    max_val_1 = maximum(abs.(signal_1))
+    println("Time Signal Statistics at x = -0.03 m:")
+    println("  - Max |Az|: $(max_val_1 * 1e5) mWb/cm")
+    println("  - Time range: $(minimum(times_1)) to $(maximum(times_1)) s")
+end
+
+# Plot individual FFT at x = xb1 - 0.01 m
+if haskey(individual_fft_results, 2)  # Second probe is x = xb1 - 0.01
+    freq_2, mag_2 = individual_fft_results[2]
+    
+    fft_plot_xb1 = plot(freq_2, mag_2 * 1e5,
+        xlabel="Frequency [Hz]", ylabel=L"Magnitude\ \mathrm{[mWb/cm]}",
+        title="FFT Spectrum at x = $(round(xb1 - 0.01, digits=4)) m",
+        xlims=(0, max_freq_plot), seriestype=:sticks, lw=3, color=:green, legend=false, bottom_margin=8mm)
+    savefig(fft_plot_xb1, joinpath(output_dir, "transient_1d_fft_x_xb1_minus_0p01.png"))
+    display(fft_plot_xb1)
+    
+    # Analysis for xb1 - 0.01 probe
+    max_mag_2, idx_max_2 = findmax(mag_2)
+    if idx_max_2 <= length(freq_2)
+        peak_freq_2 = freq_2[idx_max_2]
+        println("FFT Analysis Results at x = $(round(xb1 - 0.01, digits=4)) m:")
+        println("  - Peak Amplitude: $(max_mag_2 * 1e5) mWb/cm")
+        println("  - Peak Frequency: $(peak_freq_2) Hz")
+    end
+end
+
+# Plot time signal at x = xb1 - 0.01 m
+if haskey(time_series_data, 2)  # Second probe is x = xb1 - 0.01
+    times_2, signal_2 = time_series_data[2]
+    
+    time_plot_xb1 = plot(times_2, signal_2 * 1e5,
+        xlabel="Time [s]", ylabel=L"A_z\ \mathrm{[mWb/cm]}",
+        title="Time Signal at x = $(round(xb1 - 0.01, digits=4)) m",
+        lw=2, color=:green, legend=false, bottom_margin=8mm)
+    savefig(time_plot_xb1, joinpath(output_dir, "transient_1d_time_signal_x_xb1_minus_0p01.png"))
+    display(time_plot_xb1)
+    
+    # Print signal statistics
+    max_val_2 = maximum(abs.(signal_2))
+    println("Time Signal Statistics at x = $(round(xb1 - 0.01, digits=4)) m:")
+    println("  - Max |Az|: $(max_val_2 * 1e5) mWb/cm")
+    println("  - Time range: $(minimum(times_2)) to $(maximum(times_2)) s")
+end
+
+# Plot averaged FFT across multiple probes
+fft_plot_averaged = plot(frequencies, averaged_fft_magnitudes * 1e5,
     xlabel="Frequency [Hz]", ylabel=L"Magnitude\ \mathrm{[mWb/cm]}",
-    title="FFT Spectrum of spatially averaged Az (xa2 to center)",
+    title="FFT Spectrum (Averaged across $(num_averaging_probes) probes)",
     xlims=(0, max_freq_plot), seriestype=:sticks, lw=3, color=:blue, legend=false, bottom_margin=8mm)
-savefig(fft_plot, joinpath(output_dir, "transient_1d_fft.png"))
-display(fft_plot)
+savefig(fft_plot_averaged, joinpath(output_dir, "transient_1d_fft_averaged.png"))
+display(fft_plot_averaged)
 
-if !isempty(fft_magnitudes) && !isempty(fft_frequencies)
-    max_magnitude_fft, idx_max = findmax(fft_magnitudes)
-    if idx_max <= length(fft_frequencies)
-        peak_frequency_fft = fft_frequencies[idx_max]
-        println("FFT Analysis Results for spatially averaged Az (xa2 to center):")
-        println("  - Peak Amplitude (from FFT): $(max_magnitude_fft * 1e5) mWb/cm")
-        println("  - Frequency at Peak: $(peak_frequency_fft) Hz")
+# Generate core-only averaged FFT 
+println("Computing core-only averaged FFT...")
+core_frequencies, core_averaged_fft_magnitudes = MagnetostaticsFEM.compute_multi_probe_fft_average(
+    solution_transient_iterable,
+    all_probe_points,
+    steps_for_fft_start_time,
+    sampling_rate;
+    core_only=true
+)
+
+# Plot core-only averaged FFT and save as PDF
+fft_plot_core_averaged = plot(core_frequencies, core_averaged_fft_magnitudes * 1e5,
+    xlabel="Frequency [Hz]", ylabel=L"Magnitude\ \mathrm{[mWb/cm]}",
+    title="FFT Spectrum (Core-Only Averaged)",
+    xlims=(0, max_freq_plot), seriestype=:sticks, lw=3, color=:darkgreen, legend=false, bottom_margin=8mm)
+savefig(fft_plot_core_averaged, joinpath(output_dir, "transient_1d_fft_core_averaged.pdf"))
+display(fft_plot_core_averaged)
+
+# Analysis for averaged FFT
+if !isempty(averaged_fft_magnitudes)
+    max_magnitude_fft, idx_max = findmax(averaged_fft_magnitudes)
+    if idx_max <= length(frequencies)
+        peak_frequency_fft = frequencies[idx_max]
+        println("FFT Analysis Results (Averaged across probes):")
+        println("  - Peak Amplitude: $(max_magnitude_fft * 1e5) mWb/cm")
+        println("  - Peak Frequency: $(peak_frequency_fft) Hz")
         
-        freq_resolution = sampling_rate / length(time_signal_data) 
+        freq_resolution = sampling_rate / 41  # Approximate number of time points
         if abs(peak_frequency_fft - freq) < freq_resolution 
             println("  - FFT peak frequency matches source frequency of $(freq) Hz.")
         else
             println("  - WARNING: FFT peak frequency ($(peak_frequency_fft) Hz) does NOT closely match source frequency ($(freq) Hz). Resolution: $(freq_resolution) Hz")
         end
-    else
-        println("FFT analysis error: index of max magnitude is out of bounds for frequencies.")
     end
-else
-    println("FFT analysis could not be performed (no magnitudes or frequencies found).")
+end
+
+# Analysis for core-only averaged FFT
+if !isempty(core_averaged_fft_magnitudes)
+    max_magnitude_core_fft, idx_max_core = findmax(core_averaged_fft_magnitudes)
+    if idx_max_core <= length(core_frequencies)
+        peak_frequency_core_fft = core_frequencies[idx_max_core]
+        println("FFT Analysis Results (Core-Only Averaged):")
+        println("  - Peak Amplitude: $(max_magnitude_core_fft * 1e5) mWb/cm")
+        println("  - Peak Frequency: $(peak_frequency_core_fft) Hz")
+        
+        freq_resolution = sampling_rate / 41  # Approximate number of time points
+        if abs(peak_frequency_core_fft - freq) < freq_resolution 
+            println("  - FFT peak frequency matches source frequency of $(freq) Hz.")
+        else
+            println("  - WARNING: FFT peak frequency ($(peak_frequency_core_fft) Hz) does NOT closely match source frequency ($(freq) Hz).")
+        end
+    end
 end
 
 # %% Conceptual Comparison with Frequency Domain
@@ -301,4 +405,3 @@ end
 
 println("\n✓ Transient 1D simulation completed successfully!")
 println("Results saved to: ", output_dir)
-println("Enhanced plots saved with mesh annotations and color coding")

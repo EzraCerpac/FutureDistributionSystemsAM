@@ -32,7 +32,7 @@ using Plots.PlotMeasures
 # ## Define Parameters and Paths
 # # Paths
 mesh_file = joinpath(paths["GEO_DIR"], "coil_geo.msh")
-output_dir = joinpath(paths["OUTPUT_DIR"], "transient_1d_nonlinear_results")
+output_dir = joinpath(paths["FIGURES_DIR"], "transient_nonlinear_results")
 if !isdir(output_dir)
     mkpath(output_dir)
 end
@@ -89,10 +89,10 @@ dirichlet_bc_func(x::Point, t::Real) = 0.0 # For Gridap internals needing g(x,t)
 
 # --- Transient Simulation Parameters ---
 t0 = 0.0
-periods_to_simulate = 2  # Quick test with 2 periods
+periods_to_simulate = 10  # Quick test with 2 periods
 tF = periods_to_simulate / freq # Simulate for 2 periods
-num_steps_per_period = 80  # Smaller steps for faster testing (250 Hz Nyquist)
-num_periods_collect_fft = 1 # Use last 1 period for FFT
+num_steps_per_period = 100  # Smaller steps for faster testing (250 Hz Nyquist)
+num_periods_collect_fft = 5 # Use last 10 period for FFT
 Δt_val = (1 / freq) / num_steps_per_period # Time step size, renamed to Δt_val to avoid conflict with module Δt
 θ_method = 0.5 # Crank-Nicolson (0.5), BE (1.0), FE (0.0)
 
@@ -196,78 +196,254 @@ println("✓ Solver completed successfully!")
 # ## Post-processing and Visualization
 
 # %%
-# Extract spatially averaged signal across core region
-x_start = xa2  # Left core boundary (≈ -0.05015 m)
-x_end = 0.0    # Center (spans left core + left coil + center core)
+# Multi-probe FFT analysis with averaging and individual probe plots (Nonlinear case)
 steps_for_fft_start_time = tF - (num_periods_collect_fft / freq)
+sampling_rate = 1/Δt_val
 
-# Extract spatially averaged signal using new signal processing function
-println("Extracting spatially averaged signal (xa2 to center)...")
-time_steps_for_fft, time_signal_data = MagnetostaticsFEM.extract_spatially_averaged_signal(
+offset = 0.01
+# Define probe points
+probe_x_03 = VectorValue(-0.03)           # Individual probe at x = -0.03 m
+probe_xb1_minus_01 = VectorValue(xb1 - offset)  # Individual probe at x = xb1 - 0.003 m
+
+# Define multiple probe points for averaging (from xa2 to center)
+num_averaging_probes = 51
+x_coords_averaging = collect(range(xa2, xb1 - offset, length=num_averaging_probes))
+probe_points_averaging = [VectorValue(x) for x in x_coords_averaging]
+
+# All probe points (for extraction)
+all_probe_points = [probe_x_03, probe_xb1_minus_01]
+append!(all_probe_points, probe_points_averaging)
+
+println("Multi-probe FFT setup (Nonlinear):")
+println("  - Individual probe 1: x = $(probe_x_03[1]) m")
+println("  - Individual probe 2: x = $(probe_xb1_minus_01[1]) m")
+println("  - Averaging probes: $(num_averaging_probes) points from $(xa2) to 0.0 m")
+
+# Compute multi-probe FFT with individual results and time series
+frequencies, averaged_fft_magnitudes, individual_fft_results, time_series_data = MagnetostaticsFEM.compute_multi_probe_fft_average(
     solution_transient_iterable,
-    x_start,
-    x_end, 
-    steps_for_fft_start_time;
-    num_spatial_points=100
+    all_probe_points,
+    steps_for_fft_start_time,
+    sampling_rate;
+    return_individual_ffts=true,
+    return_time_series=true
 )
 
-# Debug: Print field statistics
-if !isempty(time_signal_data)
-    max_az_overall = maximum(abs.(time_signal_data))
-    println("=== Field Statistics ===")
-    println("  Max |Az| overall: $(max_az_overall * 1e5) mWb/cm")
-    println("  Target Az amplitude: 35 mWb/cm")
-    println("Signal extraction completed for $(length(time_signal_data)) points")
-else
-    println("Warning: No signal data extracted")
+# Plot individual FFT at x = -0.03 m
+if haskey(individual_fft_results, 1)  # First probe is x = -0.03
+    freq_1, mag_1 = individual_fft_results[1]
+    max_freq_plot = 1000
+    
+    fft_plot_x03 = plot(freq_1, mag_1 * 1e5,
+        xlabel="Frequency [Hz]", ylabel=L"Magnitude\ \mathrm{[mWb/cm]}",
+        title="FFT Spectrum (Nonlinear) at x = -0.03 m",
+        xlims=(0, max_freq_plot), seriestype=:sticks, lw=3, color=:red, legend=false, bottom_margin=8mm)
+    savefig(fft_plot_x03, joinpath(output_dir, "transient_1d_nonlinear_fft_x_minus_0p03.png"))
+    display(fft_plot_x03)
+    
+    # Analysis for x = -0.03 probe (including harmonics)
+    max_mag_1, idx_max_1 = findmax(mag_1)
+    if idx_max_1 <= length(freq_1)
+        peak_freq_1 = freq_1[idx_max_1]
+        println("=== FFT Analysis Results (Nonlinear) at x = -0.03 m ===")
+        println("  - Peak Amplitude: $(max_mag_1 * 1e5) mWb/cm")
+        println("  - Peak Frequency: $(peak_freq_1) Hz")
+        
+        # Check for harmonics
+        fundamental_idx = findmin(abs.(freq_1 .- freq))[2]
+        if fundamental_idx <= length(mag_1)
+            fundamental_mag = mag_1[fundamental_idx]
+            third_harmonic_idx = findmin(abs.(freq_1 .- (3*freq)))[2]
+            fifth_harmonic_idx = findmin(abs.(freq_1 .- (5*freq)))[2]
+            
+            println("  - Fundamental ($(freq) Hz): $(fundamental_mag * 1e5) mWb/cm")
+            if third_harmonic_idx <= length(mag_1)
+                third_mag = mag_1[third_harmonic_idx]
+                third_percent = (third_mag / fundamental_mag) * 100
+                println("  - 3rd Harmonic ($(3*freq) Hz): $(third_mag * 1e5) mWb/cm ($(round(third_percent, digits=1))%)")
+            end
+            if fifth_harmonic_idx <= length(mag_1)
+                fifth_mag = mag_1[fifth_harmonic_idx]
+                fifth_percent = (fifth_mag / fundamental_mag) * 100
+                println("  - 5th Harmonic ($(5*freq) Hz): $(fifth_mag * 1e5) mWb/cm ($(round(fifth_percent, digits=1))%)")
+            end
+        end
+    end
 end
 
-# %%
-# Process extracted signal
-valid_indices = .!isnan.(time_signal_data)
-time_steps_for_fft = time_steps_for_fft[valid_indices]
-time_signal_data = time_signal_data[valid_indices]
-
-if isempty(time_steps_for_fft)
-    error("No time points collected for FFT. Check simulation time (tF=$(tF), Δt=$(Δt_val)), collection window, or probe point.\nCollected $(length(time_signal_data)) points before NaN filter.")
+# Plot time signal at x = -0.03 m (Nonlinear)
+if haskey(time_series_data, 1)  # First probe is x = -0.03
+    times_1, signal_1 = time_series_data[1]
+    
+    time_plot_x03 = plot(times_1, signal_1 * 1e5,
+        xlabel="Time [s]", ylabel=L"A_z\ \mathrm{[mWb/cm]}",
+        title="Time Signal (Nonlinear) at x = -0.03 m",
+        lw=2, color=:red, legend=false, bottom_margin=8mm)
+    savefig(time_plot_x03, joinpath(output_dir, "transient_1d_nonlinear_time_signal_x_minus_0p03.png"))
+    display(time_plot_x03)
+    
+    # Print signal statistics
+    max_val_1 = maximum(abs.(signal_1))
+    println("Time Signal Statistics (Nonlinear) at x = -0.03 m:")
+    println("  - Max |Az|: $(max_val_1 * 1e5) mWb/cm")
+    println("  - Time range: $(minimum(times_1)) to $(maximum(times_1)) s")
 end
 
-# Plot time signal with improved styling (consistent units with 1D-Harmonic.jl)
-time_plot = plot(time_steps_for_fft, time_signal_data * 1e5,
-    xlabel="Time [s]", ylabel=L"A_z\ \mathrm{[mWb/cm]}",
-    title="Spatially averaged Az (Nonlinear, xa2 to center, last $(num_periods_collect_fft) periods)",
-    lw=2, color=:blue, legend=false, bottom_margin=8mm)
-savefig(time_plot, joinpath(output_dir, "transient_1d_nonlinear_signal.png"))
-display(time_plot)
+# Plot individual FFT at x = xb1 - 0.01 m
+if haskey(individual_fft_results, 2)  # Second probe is x = xb1 - 0.01
+    freq_2, mag_2 = individual_fft_results[2]
+    
+    fft_plot_xb1 = plot(freq_2, mag_2 * 1e5,
+        xlabel="Frequency [Hz]", ylabel=L"Magnitude\ \mathrm{[mWb/cm]}",
+        title="FFT Spectrum (Nonlinear) at x = $(round(xb1 - 0.01, digits=4)) m",
+        xlims=(0, max_freq_plot), seriestype=:sticks, lw=3, color=:green, legend=false, bottom_margin=8mm)
+    savefig(fft_plot_xb1, joinpath(output_dir, "transient_1d_nonlinear_fft_x_xb1_minus_0p01.png"))
+    display(fft_plot_xb1)
+    
+    # Analysis for xb1 - 0.01 probe (including harmonics)
+    max_mag_2, idx_max_2 = findmax(mag_2)
+    if idx_max_2 <= length(freq_2)
+        peak_freq_2 = freq_2[idx_max_2]
+        println("=== FFT Analysis Results (Nonlinear) at x = $(round(xb1 - 0.01, digits=4)) m ===")
+        println("  - Peak Amplitude: $(max_mag_2 * 1e5) mWb/cm")
+        println("  - Peak Frequency: $(peak_freq_2) Hz")
+        
+        # Check for harmonics
+        fundamental_idx = findmin(abs.(freq_2 .- freq))[2]
+        if fundamental_idx <= length(mag_2)
+            fundamental_mag = mag_2[fundamental_idx]
+            third_harmonic_idx = findmin(abs.(freq_2 .- (3*freq)))[2]
+            fifth_harmonic_idx = findmin(abs.(freq_2 .- (5*freq)))[2]
+            
+            println("  - Fundamental ($(freq) Hz): $(fundamental_mag * 1e5) mWb/cm")
+            if third_harmonic_idx <= length(mag_2)
+                third_mag = mag_2[third_harmonic_idx]
+                third_percent = (third_mag / fundamental_mag) * 100
+                println("  - 3rd Harmonic ($(3*freq) Hz): $(third_mag * 1e5) mWb/cm ($(round(third_percent, digits=1))%)")
+            end
+            if fifth_harmonic_idx <= length(mag_2)
+                fifth_mag = mag_2[fifth_harmonic_idx]
+                fifth_percent = (fifth_mag / fundamental_mag) * 100
+                println("  - 5th Harmonic ($(5*freq) Hz): $(fifth_mag * 1e5) mWb/cm ($(round(fifth_percent, digits=1))%)")
+            end
+        end
+    end
+end
 
-# %%
-# FFT Analysis
-println("Performing FFT analysis on nonlinear transient results...")
-sampling_rate = 1 / Δt_val
+# Plot time signal at x = xb1 - 0.01 m (Nonlinear)
+if haskey(time_series_data, 2)  # Second probe is x = xb1 - 0.01
+    times_2, signal_2 = time_series_data[2]
+    
+    time_plot_xb1 = plot(times_2, signal_2 * 1e5,
+        xlabel="Time [s]", ylabel=L"A_z\ \mathrm{[mWb/cm]}",
+        title="Time Signal (Nonlinear) at x = $(round(xb1 - 0.01, digits=4)) m",
+        lw=2, color=:green, legend=false, bottom_margin=8mm)
+    savefig(time_plot_xb1, joinpath(output_dir, "transient_1d_nonlinear_time_signal_x_xb1_minus_0p01.png"))
+    display(time_plot_xb1)
+    
+    # Print signal statistics
+    max_val_2 = maximum(abs.(signal_2))
+    println("Time Signal Statistics (Nonlinear) at x = $(round(xb1 - 0.01, digits=4)) m:")
+    println("  - Max |Az|: $(max_val_2 * 1e5) mWb/cm")
+    println("  - Time range: $(minimum(times_2)) to $(maximum(times_2)) s")
+end
 
-fft_frequencies, fft_magnitudes = MagnetostaticsFEM.perform_fft(time_signal_data, sampling_rate)
-
-# Plot FFT with stem plot (vertical stripes) - consistent units with 1D-Harmonic.jl
-max_freq_plot = 1000  # Plot up to 1000 Hz as requested
-fft_plot = plot(fft_frequencies, fft_magnitudes * 1e5,
+# Plot averaged FFT across multiple probes
+fft_plot_averaged = plot(frequencies, averaged_fft_magnitudes * 1e5,
     xlabel="Frequency [Hz]", ylabel=L"Magnitude\ \mathrm{[mWb/cm]}",
-    title="FFT Spectrum of spatially averaged Az (Nonlinear, xa2 to center)",
+    title="FFT Spectrum (Nonlinear, Averaged across $(num_averaging_probes) probes)",
     xlims=(0, max_freq_plot), seriestype=:sticks, lw=3, color=:blue, legend=false, bottom_margin=8mm)
-savefig(fft_plot, joinpath(output_dir, "transient_1d_nonlinear_fft.png"))
-display(fft_plot)
+savefig(fft_plot_averaged, joinpath(output_dir, "transient_1d_nonlinear_fft_averaged.png"))
+display(fft_plot_averaged)
 
-if !isempty(fft_magnitudes) && !isempty(fft_frequencies)
-    max_magnitude_fft, idx_max = findmax(fft_magnitudes)
-    if idx_max <= length(fft_frequencies)
-        peak_frequency_fft = fft_frequencies[idx_max]
-        println("=== FFT Analysis Results ===")
-        println("FFT Analysis Results for spatially averaged Az (Nonlinear, xa2 to center):")
-        println("  - Peak Amplitude (from FFT): $(max_magnitude_fft * 1e5) mWb/cm")
+# Generate core-only averaged FFT 
+println("Computing core-only averaged FFT (Nonlinear)...")
+core_frequencies, core_averaged_fft_magnitudes = MagnetostaticsFEM.compute_multi_probe_fft_average(
+    solution_transient_iterable,
+    all_probe_points,
+    steps_for_fft_start_time,
+    sampling_rate;
+    core_only=true
+)
+
+# Plot core-only averaged FFT and save as PDF
+fft_plot_core_averaged = plot(core_frequencies, core_averaged_fft_magnitudes * 1e5,
+    xlabel="Frequency [Hz]", ylabel=L"Magnitude\ \mathrm{[mWb/cm]}",
+    title="FFT Spectrum (Nonlinear, Core-Only Averaged)",
+    xlims=(0, max_freq_plot), seriestype=:sticks, lw=3, color=:darkgreen, legend=false, bottom_margin=8mm)
+savefig(fft_plot_core_averaged, joinpath(output_dir, "transient_1d_nonlinear_fft_core_averaged.pdf"))
+display(fft_plot_core_averaged)
+
+# Analysis for core-only averaged FFT
+if !isempty(core_averaged_fft_magnitudes)
+    max_magnitude_core_fft, idx_max_core = findmax(core_averaged_fft_magnitudes)
+    if idx_max_core <= length(core_frequencies)
+        peak_frequency_core_fft = core_frequencies[idx_max_core]
+        println("=== FFT Analysis Results (Nonlinear, Core-Only Averaged) ===")
+        println("  - Peak Amplitude: $(max_magnitude_core_fft * 1e5) mWb/cm")
+        println("  - Peak Frequency: $(peak_frequency_core_fft) Hz")
+        
+        # Check for harmonics in core-only averaged spectrum
+        fundamental_idx = findmin(abs.(core_frequencies .- freq))[2]
+        if fundamental_idx <= length(core_averaged_fft_magnitudes)
+            fundamental_mag = core_averaged_fft_magnitudes[fundamental_idx]
+            third_harmonic_idx = findmin(abs.(core_frequencies .- (3*freq)))[2]
+            fifth_harmonic_idx = findmin(abs.(core_frequencies .- (5*freq)))[2]
+            
+            println("  - Fundamental ($(freq) Hz): $(fundamental_mag * 1e5) mWb/cm")
+            if third_harmonic_idx <= length(core_averaged_fft_magnitudes)
+                third_mag = core_averaged_fft_magnitudes[third_harmonic_idx]
+                third_percent = (third_mag / fundamental_mag) * 100
+                println("  - 3rd Harmonic ($(3*freq) Hz): $(third_mag * 1e5) mWb/cm ($(round(third_percent, digits=1))%)")
+            end
+            if fifth_harmonic_idx <= length(core_averaged_fft_magnitudes)
+                fifth_mag = core_averaged_fft_magnitudes[fifth_harmonic_idx]
+                fifth_percent = (fifth_mag / fundamental_mag) * 100
+                println("  - 5th Harmonic ($(5*freq) Hz): $(fifth_mag * 1e5) mWb/cm ($(round(fifth_percent, digits=1))%)")
+            end
+        end
+        
+        freq_resolution = sampling_rate / 41  # Approximate number of time points
+        if abs(peak_frequency_core_fft - freq) < freq_resolution * 1.5
+            println("  - FFT peak frequency matches source frequency of $(freq) Hz.")
+        else
+            println("  - WARNING: FFT peak frequency ($(peak_frequency_core_fft) Hz) does NOT closely match source frequency ($(freq) Hz).")
+        end
+    end
+end
+
+# Analysis for averaged FFT (including harmonics)
+if !isempty(averaged_fft_magnitudes)
+    max_magnitude_fft, idx_max = findmax(averaged_fft_magnitudes)
+    if idx_max <= length(frequencies)
+        peak_frequency_fft = frequencies[idx_max]
+        println("=== FFT Analysis Results (Nonlinear, Averaged across probes) ===")
+        println("  - Peak Amplitude: $(max_magnitude_fft * 1e5) mWb/cm")
+        println("  - Peak Frequency: $(peak_frequency_fft) Hz")
         println("  - Target Amplitude: 35 mWb/cm")
         println("  - Amplitude Ratio (current/target): $(round(max_magnitude_fft * 1e5 / 35, digits=2))")
-        println("  - Frequency at Peak: $(peak_frequency_fft) Hz")
-
-        freq_resolution = sampling_rate / length(time_signal_data)
+        
+        # Check for harmonics in averaged spectrum
+        fundamental_idx = findmin(abs.(frequencies .- freq))[2]
+        if fundamental_idx <= length(averaged_fft_magnitudes)
+            fundamental_mag = averaged_fft_magnitudes[fundamental_idx]
+            third_harmonic_idx = findmin(abs.(frequencies .- (3*freq)))[2]
+            fifth_harmonic_idx = findmin(abs.(frequencies .- (5*freq)))[2]
+            
+            println("  - Fundamental ($(freq) Hz): $(fundamental_mag * 1e5) mWb/cm")
+            if third_harmonic_idx <= length(averaged_fft_magnitudes)
+                third_mag = averaged_fft_magnitudes[third_harmonic_idx]
+                third_percent = (third_mag / fundamental_mag) * 100
+                println("  - 3rd Harmonic ($(3*freq) Hz): $(third_mag * 1e5) mWb/cm ($(round(third_percent, digits=1))%)")
+            end
+            if fifth_harmonic_idx <= length(averaged_fft_magnitudes)
+                fifth_mag = averaged_fft_magnitudes[fifth_harmonic_idx]
+                fifth_percent = (fifth_mag / fundamental_mag) * 100
+                println("  - 5th Harmonic ($(5*freq) Hz): $(fifth_mag * 1e5) mWb/cm ($(round(fifth_percent, digits=1))%)")
+            end
+        end
+        
+        freq_resolution = sampling_rate / 41  # Approximate number of time points
         if abs(peak_frequency_fft - freq) < freq_resolution * 1.5 # Allow some tolerance for nonlinear case
             println("  - FFT peak frequency is close to source fundamental frequency of $(freq) Hz.")
         else
@@ -275,15 +451,15 @@ if !isempty(fft_magnitudes) && !isempty(fft_frequencies)
         end
 
         # Look for harmonics (characteristic of nonlinear behavior)
-        println("\\n  - Harmonic Analysis:")
+        println("\n  - Harmonic Analysis:")
         global total_harmonic_power = 0.0
         for harmonic in 2:5
             target_freq = harmonic * freq
-            if target_freq <= maximum(fft_frequencies)
+            if target_freq <= maximum(frequencies)
                 # Find closest frequency to harmonic
-                closest_idx = argmin(abs.(fft_frequencies .- target_freq))
-                harmonic_magnitude = fft_magnitudes[closest_idx]
-                harmonic_freq = fft_frequencies[closest_idx]
+                closest_idx = argmin(abs.(frequencies .- target_freq))
+                harmonic_magnitude = averaged_fft_magnitudes[closest_idx]
+                harmonic_freq = frequencies[closest_idx]
                 if abs(harmonic_freq - target_freq) < freq_resolution * 2
                     harmonic_ratio = harmonic_magnitude / max_magnitude_fft * 100
                     global total_harmonic_power += harmonic_magnitude^2
@@ -381,13 +557,3 @@ end
 
 println("\n✓ Nonlinear Transient 1D simulation completed successfully!")
 println("Results saved to: ", output_dir)
-println("Enhanced plots saved with mesh annotations and color coding")
-println("\nNote: This version uses true nonlinear B-H curve material properties.")
-println("Frohlich-Kennelly model parameters: a=$(bh_a), b=$(bh_b), c=$(bh_c)")
-println("B-H curve knee at ~$(round(bh_c^(1/(2*bh_b)), digits=6)) T")
-println("Magnetic saturation effects should be visible in harmonic generation.")
-println("\\n=== Parameter Tuning Guide ===")
-println("To increase amplitude: increase J0_amplitude")
-println("To decrease amplitude: decrease J0_amplitude")
-println("To increase nonlinearity: decrease bh_c (lower saturation field)")
-println("To decrease nonlinearity: increase bh_c (higher saturation field)")

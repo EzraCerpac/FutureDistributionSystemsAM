@@ -20,7 +20,7 @@ println("--- Starting Transient 1D Magnetodynamics Example ---")
 # --- Model Parameters ---
 J0_amplitude = 2.2e4  # Source current density amplitude [A/m²]
 μ0 = 4e-7 * pi     # Vacuum permeability [H/m]
-μr_core = 50000.0    # Relative permeability of the core (linear assumption for transient)
+μr_core = 5000.0    # Relative permeability of the core (consistent with transient)
 σ_core = 1e7       # Conductivity of the core [S/m]
 freq = 50.0          # Frequency of the source current [Hz]
 ω_source = 2 * pi * freq # Angular frequency [rad/s]
@@ -31,9 +31,9 @@ field_type = ComplexF64
 dirichlet_tag = "D"
 dirichlet_value = 0.0 + 0.0im # Dirichlet BC for A = u + iv
 
-mesh_file = joinpath(GEO_DIR, "coil_geo.msh")
+mesh_file = joinpath(paths["GEO_DIR"], "coil_geo.msh")
 # --- Output Parameters ---
-output_dir = joinpath(OUT_DIR, "harmonic_1d_results_jl")
+output_dir = joinpath(paths["FIGURES_DIR"], "harmonic_results")
 if !isdir(output_dir)   
     mkdir(output_dir)
 end
