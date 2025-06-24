@@ -30,11 +30,11 @@ J0 = 2.2e4       # Source current density [A/m²] (Assumed Real)
 μ0 = 4e-7 * pi  # Vacuum permeability [H/m]
 μr_core = 5000.0 # Relative permeability of the core
 σ_core = 1e7    # Conductivity of the core [S/m]
-freq = 5000    # Frequency [Hz]
+freq = 50    # Frequency [Hz]
 ω = 2 * pi * freq # Angular frequency [rad/s]
 
 # FEM Parameters
-order = 3
+order = 5
 field_type = ComplexF64 # Still use ComplexF64 marker for setup_fe_spaces
 dirichlet_tag = "D"
 dirichlet_value = 0.0 + 0.0im # Dirichlet BC for A = u + iv
@@ -210,38 +210,41 @@ display(heat_plot)
 
 
 # # %% [markdown]
-# # ## Visualization (Magnitudes)
+# ## Visualization (Magnitudes)
 
-# # %%
-# # Define geometry boundaries for plotting
-# a_len = 100.3e-3; b_len = 73.15e-3; c_len = 27.5e-3
-# xa1 = -a_len/2; xb1 = -b_len/2; xc1 = -c_len/2
-# xc2 = c_len/2; xb2 = b_len/2; xa2 = a_len/2
-# boundaries = [xa1, xb1, xc1, xc2, xb2, xa2]
+# %%
+# Define geometry boundaries for plotting
+a_len = 100.3e-3; b_len = 73.15e-3; c_len = 27.5e-3
+xa1 = -a_len/2; xb1 = -b_len/2; xc1 = -c_len/2
+xc2 = c_len/2; xb2 = b_len/2; xa2 = a_len/2
+boundaries = [xa1, xb1, xc1, xc2, xb2, xa2]
 
-# # %%
-# # Define points for visualization
-# x_int = collect(range(-0.1, 0.1, length=1000))
-# coord = [VectorValue(x_) for x_ in x_int]
+# %%
+# Define points for visualization
+x_int = collect(range(-0.1, 0.1, length=1000))
+coord = [VectorValue(x_) for x_ in x_int]
 
-# # Evaluate magnitudes at interpolation points
-# Az_mag_vals = Az_mag(coord)
-# B_mag_vals = B_mag(coord)
-# Jeddy_mag_vals = Jeddy_mag(coord)
-# ν_vals_linear = ν_field_linear(coord) # Evaluate the linear reluctivity field
-# μ_vals_linear = 1 ./ ν_vals_linear # Convert reluctivity to permeability
+# Evaluate magnitudes at interpolation points
+Az_mag_vals = Az_mag(coord)
+B_mag_vals = B_mag(coord)
+Jeddy_mag_vals = Jeddy_mag(coord)
+ν_vals_linear = ν_field_linear(coord) # Evaluate the linear reluctivity field
+μ_vals_linear = 1 ./ ν_vals_linear # Convert reluctivity to permeability
 
-# # Calculate midpoints for region labels
-# x_min_plot = minimum(x_int); x_max_plot = maximum(x_int)
-# midpoints = [(x_min_plot + xa1)/2, (xa1 + xb1)/2, (xb1 + xc1)/2, (xc1 + xc2)/2, (xc2 + xb2)/2, (xb2 + xa2)/2, (xa2 + x_max_plot)/2]
-# region_labels = ["Air", "Core", "Coil L", "Core", "Coil R", "Core", "Air"]
+# Calculate midpoints for region labels
+x_min_plot = minimum(x_int); x_max_plot = maximum(x_int)
+midpoints = [(x_min_plot + xa1)/2, (xa1 + xb1)/2, (xb1 + xc1)/2, (xc1 + xc2)/2, (xc2 + xb2)/2, (xb2 + xa2)/2, (xa2 + x_max_plot)/2]
+region_labels = ["Air", "Core", "Coil L", "Core", "Coil R", "Core", "Air"]
 
-# # Plot Magnitudes
-# p1 = plot(x_int * 1e2, Az_mag_vals * 1e5, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"|A_z(x)|\ \mathrm{[mWb/cm]}", color=:black, lw=1, legend=false, title=L"|A_z|" *" Magnitude")
-# p2 = plot(x_int * 1e2, B_mag_vals * 1e3, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"|B_y(x)|\ \mathrm{[mT]}", color=:black, lw=1, legend=false, title=L"|B_y|" *" Magnitude")
-# p3 = plot(x_int * 1e2, Jeddy_mag_vals * 1e-4, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"|J_{eddy}(x)|\ \mathrm{[A/cm^2]}", color=:black, lw=1, legend=false, title=L"|J_{eddy}|" *" Magnitude")
-# p4 = plot(x_int * 1e2, μ_vals_linear, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"\mu(x)\ \mathrm{[m/H]}", color=:black, lw=1, legend=false, title="Permeability (Linear)")
-
+# Plot Magnitudes
+p1 = plot(x_int * 1e2, Az_mag_vals * 1e5, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"|A_z(x)|\ \mathrm{[mWb/cm]}", color=:black, lw=1, legend=false, title=L"|A_z|" *" Magnitude")
+p2 = plot(x_int * 1e2, B_mag_vals * 1e3, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"|B_y(x)|\ \mathrm{[mT]}", color=:black, lw=1, legend=false, title=L"|B_y|" *" Magnitude")
+p3 = plot(x_int * 1e2, Jeddy_mag_vals * 1e-4, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"|J_{eddy}(x)|\ \mathrm{[A/cm^2]}", color=:black, lw=1, legend=false, title=L"|J_{eddy}|" *" Magnitude")
+p4 = plot(x_int * 1e2, μ_vals_linear, xlabel=L"x\ \mathrm{[cm]}", ylabel=L"\mu(x)\ \mathrm{[m/H]}", color=:black, lw=1, legend=false, title="Permeability (Linear)")
+display(p1)
+display(p2)
+display(p3)
+display(p4)
 # # Add annotations
 # for p in [p1, p2, p3, p4]
 #     vline!(p, boundaries * 1e2, color=:grey, linestyle=:dash, label="")
