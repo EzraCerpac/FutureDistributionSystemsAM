@@ -137,8 +137,6 @@ function prepare_and_solve_transient_1d(
     Δt::Float64,
     θ_method::Float64
 )
-    println("--- Preparing Transient 1D Simulation ---")
-    println("Loading mesh and defining domains/materials...")
     model, labels, tags = load_mesh_and_tags(mesh_file)
     Ω = Triangulation(model)
     degree_quad = 2*order_fem # Quadrature degree
@@ -157,26 +155,21 @@ function prepare_and_solve_transient_1d(
     # though for current it's Js_t_func(t)(x)
     Js_t_func(t) = x -> spatial_js_profile_func(cell_tags_cf(x)) * cos(ω_source * t)
 
-    println("Setting up transient FE spaces...")
     reffe = ReferenceFE(lagrangian, Float64, order_fem)
     V0_test = TestFESpace(model, reffe, dirichlet_tags=[dirichlet_tag])
     # Pass the single, multi-dispatch BC function
     Ug_transient = TransientTrialFESpace(V0_test, dirichlet_bc_function) 
 
-    println("Defining initial condition...")
     Az0 = zero(Ug_transient(t0)) # Uses Ug_transient(t0)
 
-    println("Setting up transient operator...")
     # The Js_t_func is passed directly to the operator
     transient_op = setup_transient_operator(Ug_transient, V0_test, dΩ, σ_cf, ν_cf, Js_t_func)
 
-    println("Setting up ODE solver...")
     linear_solver_for_ode = LUSolver()
     odesolver = ThetaMethod(linear_solver_for_ode, Δt, θ_method)
 
     println("Solving transient problem from t=$(t0) to t=$(tF) with Δt=$(Δt)...")
     solution_transient_iterable = solve_transient_problem(transient_op, odesolver, t0, tF, Az0)
-    println("Transient solution obtained (iterable).")
 
     return solution_transient_iterable, Az0, Ω, ν_cf, σ_cf, Js_t_func, model, cell_tags_cf, labels
 end

@@ -55,7 +55,6 @@ function save_results_vtk(Ω::Triangulation, output_dir::String, fields_dict::Di
 
     try
         Gridap.writevtk(Ω, joinpath(output_dir, base_name); cellfields=fields_dict)
-        println("Successfully saved results to $(output_dir)")
     catch e
         println("Error saving single VTK file: $(e)")
         println("Attempting to save components individually...")
@@ -308,7 +307,6 @@ function process_transient_solution(solution_iterable, Az0::FEFunction, Ω::Tria
         end
     end
     
-    println("Processed $(length(processed_steps)) total transient steps including initial condition.")
     return processed_steps
 end
 
@@ -412,11 +410,6 @@ function save_pvd_and_extract_signal(
                 
                 pvd_file[tn] = createvtk(Ω, filename_base, cellfields=vtk_fields)
                 
-                if step_idx == 1
-                    println("Saved initial condition (t=$(tn)) with enhanced fields to PVD.")
-                elseif step_idx % 20 == 0
-                    println("Saved enhanced step $(step_idx-1) (t=$(tn)) to PVD.")
-                end
                 
             catch e_pvd_step
                 println("Error saving enhanced step t=$tn to PVD: $e_pvd_step")
@@ -437,14 +430,13 @@ function save_pvd_and_extract_signal(
                         push!(time_signal_data, NaN)
                     end
                 catch e_probe
-                    println("Warning: Could not evaluate Az_n at probe point $(x_probe) for t=$(tn). Error: $e_probe. Storing NaN.")
                     push!(time_signal_data, NaN)
                 end
             end
         end
     end
     println("Finished PVD saving to $(pvd_filename_base).pvd")
-    
+
     return time_steps_for_fft, time_signal_data
 end
 
@@ -463,21 +455,18 @@ function save_transient_pvd(Ω_static::Triangulation, uh_solution_iterable, pvd_
     base_name_no_ext = first(splitext(pvd_filename_base))
 
     println("Saving transient results to PVD collection: $(base_name_no_ext).pvd")
-    
+
     createpvd(base_name_no_ext) do pvd
         if uh0 !== nothing
             vtk_file_t0 = joinpath(output_dir, "$(first(splitext(basename(base_name_no_ext))))_t0")
             pvd[0.0] = createvtk(Ω_static, vtk_file_t0, cellfields=Dict("Az" => uh0))
-            println("Saved initial condition to $(vtk_file_t0).vtu")
         end
         
         for (i, (uh_n, t_n)) in enumerate(uh_solution_iterable)
             vtk_file_tn = joinpath(output_dir, "$(first(splitext(basename(base_name_no_ext))))_t$(@sprintf("%.4f", t_n))")
             pvd[t_n] = createvtk(Ω_static, vtk_file_tn, cellfields=Dict("Az" => uh_n))
-            println("Saved frame for t=$(@sprintf("%.4f", t_n)) to $(vtk_file_tn).vtu")
         end
     end
-    println("PVD collection saved.")
 end
 
 end # module PostProcessing

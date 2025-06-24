@@ -83,28 +83,19 @@ function get_material_tags_2d(labels)
     if haskey(tags, "Oil")
         tags["Air"] = tags["Oil"] # Treat Oil as Air for permeability/conductivity
     end
-    # Add aliases for winding groups if needed by generic functions
-    if haskey(tags, "HV windings")
-        # Example: If a function expects "Coil1", "Coil2", etc.
-        # tags["Coil1"] = tags["HV windings"] 
-    end
-     if haskey(tags, "LV windings")
-        # tags["Coil2"] = tags["LV windings"]
-    end
 
     # Add individual winding tags for source definition
     winding_tags = filter(name -> occursin("HV", name) || occursin("LV", name), tag_names)
     for name in winding_tags
-         if !haskey(tags, name) # Avoid overwriting if already added (e.g., "HV windings")
+        if !haskey(tags, name) # Avoid overwriting if already added (e.g., "HV windings")
             try
                 tags[name] = get_tag_from_name(labels, name)
             catch e
                  println("Warning: Could not find winding tag '$name' in the mesh labels.")
             end
-         end
+        end
     end
 
 
     return tags
 end
-

@@ -202,11 +202,6 @@ function perform_fft_periodic(time_vec::Vector{<:Real}, signal::Vector{<:Real}, 
     peak_freq = frequencies[peak_idx]
     peak_amplitude = fft_magnitudes[peak_idx]
     
-    # For debugging
-    println("All frequencies: ", frequencies)
-    println("All magnitudes: ", fft_magnitudes)
-    println("Peak index: ", peak_idx)
-    println("Frequency resolution: ", frequencies[2] - frequencies[1])
     
     return frequencies, fft_magnitudes, peak_freq, peak_amplitude, window_times, window_signal
 end
@@ -249,10 +244,6 @@ function extract_spatially_averaged_signal(
     time_steps = Float64[]
     spatially_averaged_signal = Float64[]
     
-    println("Spatial averaging setup:")
-    println("  - Range: x = $(x_start) to $(x_end) m")
-    println("  - Number of spatial points: $(num_spatial_points)")
-    println("  - Starting data collection at t = $(time_start) s")
     
     global step_count = 0
     for (solution, t) in solution_iterable
@@ -299,9 +290,6 @@ function extract_spatially_averaged_signal(
         end
     end
     
-    println("Spatial averaging completed:")
-    println("  - Collected $(length(time_steps)) time points")
-    println("  - Data range: t = $(minimum(time_steps)) to $(maximum(time_steps)) s")
     
     return time_steps, spatially_averaged_signal
 end
@@ -370,18 +358,8 @@ function compute_multi_probe_fft_average(
         
         filtered_probe_points = probe_points[core_probe_indices]
         
-        println("Core-only filtering applied:")
-        println("  - Core regions: [$xa2, $xb2] and [$xc1, $xc2]")
-        println("  - Original probes: $(length(probe_points))")
-        println("  - Core-only probes: $(length(filtered_probe_points))")
     end
     
-    println("Multi-probe FFT averaging setup:")
-    println("  - Number of probe points: $(length(filtered_probe_points))")
-    println("  - Probe locations: $(filtered_probe_points)")
-    println("  - Starting data collection at t = $(time_start) s")
-    println("  - Sampling rate: $(sampling_rate) Hz")
-    println("  - Core-only filtering: $(core_only)")
     
     # Store time series for each probe
     probe_time_series = Dict{Int, Vector{Float64}}()  # probe_index -> time_signal
@@ -393,7 +371,6 @@ function compute_multi_probe_fft_average(
     end
     
     # Extract time series at all probe points
-    println("Extracting time series at all probe locations...")
     global step_count = 0
     for (solution, t) in solution_iterable
         global step_count += 1
@@ -428,12 +405,8 @@ function compute_multi_probe_fft_average(
         end
     end
     
-    println("Time series extraction completed:")
-    println("  - Collected $(length(time_steps)) time points")
-    println("  - Data range: t = $(minimum(time_steps)) to $(maximum(time_steps)) s")
     
     # Compute FFT at each probe location
-    println("Computing FFT at each probe location...")
     individual_fft_results = Dict{Int, Tuple{Vector{Float64}, Vector{Float64}}}()
     valid_ffts = []
     
@@ -452,12 +425,9 @@ function compute_multi_probe_fft_average(
                 individual_fft_results[i] = (frequencies, fft_magnitudes)
                 push!(valid_ffts, i)
                 
-                println("  Probe $(i) at $(filtered_probe_points[i]): FFT computed ($(length(clean_signal)) points)")
             else
-                println("  Probe $(i) at $(filtered_probe_points[i]): FFT failed")
             end
         else
-            println("  Probe $(i) at $(filtered_probe_points[i]): Insufficient valid data ($(sum(valid_indices)) points)")
         end
     end
     
@@ -466,7 +436,6 @@ function compute_multi_probe_fft_average(
     end
     
     # Average FFT magnitudes across all valid probes
-    println("Averaging FFT magnitudes across $(length(valid_ffts)) valid probes...")
     
     # Use the first valid FFT to get frequency vector (all should be the same)
     first_valid_idx = valid_ffts[1]
@@ -492,7 +461,7 @@ function compute_multi_probe_fft_average(
     println("Multi-probe FFT averaging completed:")
     println("  - Averaged across $(length(valid_ffts)) probes")
     println("  - Frequency range: $(minimum(frequencies)) to $(maximum(frequencies)) Hz")
-    
+
     # Prepare time series data if requested
     time_series_data = Dict{Int, Tuple{Vector{Float64}, Vector{Float64}}}()
     if return_time_series

@@ -80,35 +80,19 @@ end
 
 function convert_to_matrix(cell_values)
     values = vcat(collect.(cell_values)...)
-"""
-    convert_to_matrix(cell_values)
-
-Helper function to convert cell values to a matrix format.
-"""
     return values
 end
 
-# Function to solve a linear FE problem
-# The following solve_fem_problem is the one intended to be used with FEOperators
-function solve_fem_problem(problem::FEOperator, U, V) # U and V are FESpaces
-    # Test if problem is an AffineFEOperator, which directly gives matrix and vector
+function solve_fem_problem(problem::FEOperator, U, V)
     if isa(problem, AffineFEOperator)
         A = get_matrix(problem)
         b = get_vector(problem)
-        # Gridap's default solve for matrix and vector
-        # This returns a vector of free DoF values
         free_values = solve(A,b) 
-        # Create a FEFunction from the free values and the trial FE space V
-        # (Note: transient_1d.jl currently uses U as the TrialFESpace in FEFunction)
-        # For MultiField, V is often the TestFESpace from which U (Trial) is derived,
-        # but FEFunction needs the Trial space. The U passed here is the TrialFESpace.
         return FEFunction(U,free_values)
-    elseif isa(problem,FEOperator) # General FEOperator
+    elseif isa(problem,FEOperator)
       solver = LUSolver() 
       @warn "Problem is a general FEOperator, not AffineFEOperator. Solving with LUSolver."
-      # This path might need an initial guess if non-linear
-      # x0 = zero_initial_guess(problem) 
-      # return solve(solver,problem,x0)
+
       return solve(solver,problem)
     else
         error("Unsupported problem type: ", typeof(problem))

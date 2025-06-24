@@ -160,23 +160,19 @@ Only displays and saves the plot if output_path is specified.
 - `clims`: Optional tuple specifying color limits for the plot.
 """
 function plot_contour_2d(Ω, field_to_plot; title="Contour Plot", nlevels=20, output_path=nothing, size=(600,600), clims=nothing)
-    # println("Generating contour plot (this might take a while for large meshes)...") # Reduced verbosity
 
     field_for_plotting = field_to_plot
     Uh_p1 = nothing # Initialize Uh_p1
 
     # Check if the field needs interpolation (e.g., if it's a CellField from composition)
     # Force interpolation to ensure we have a standard FEFunction on a P1 space
-    # println("Attempting interpolation of field to P1 space for plotting...") # Reduced verbosity
     try
         reffe_p1 = ReferenceFE(lagrangian, Float64, 1)
         # Check if Ω is just a Triangulation or a DiscreteModel
         model_for_fes_rigging = get_grid(Ω) isa DiscreteModel ? get_grid(Ω) : Ω
         Uh_p1 = FESpace(model_for_fes_rigging, reffe_p1) # Use model_for_fes_rigging
         field_for_plotting = interpolate(field_to_plot, Uh_p1)
-        # println("Interpolation successful.") # Reduced verbosity
     catch e_interp
-        # println("Warning: Could not interpolate field onto P1 space. Using original field. Error: $e_interp") # Reduced verbosity
         field_for_plotting = field_to_plot # Fallback to original field
     end
     
@@ -238,23 +234,10 @@ function plot_contour_2d(Ω, field_to_plot; title="Contour Plot", nlevels=20, ou
         # Always return the plot object
         return plt
     catch e
-        # println("Error generating contour plot: $e") # Reduced verbosity
-        # println("If the error persists, consider exporting to VTK and using Paraview.") # Reduced verbosity
     end
     return nothing # Return nothing if error occurs
 end
 
-# Function to extract node coordinates from a triangulation
-# function get_node_coordinates(Ω) # Now imported from Gridap.Geometry
-#     # Get the underlying grid from the triangulation
-#     grid = Ω.grid
-    
-#     # Extract node coordinates from the grid
-#     # This might need adjustment based on the specific Gridap version and grid type
-#     coords = grid.node_coordinates
-    
-#     return coords
-# end
 
 # function calculate_b_field is not defined in this file. Assuming it's imported or available in scope.
 # If not, it should be passed as an argument or handled appropriately.
@@ -268,7 +251,6 @@ function create_field_animation(
     fps=15,
     plotinfo=Dict() # Keep for future use
 )
-    println("Creating harmonic field animation...")
     
     # Extract real and imaginary parts
     u = uv_complex[1]  # Real part of Az
@@ -276,14 +258,12 @@ function create_field_animation(
     
     # Calculate B field if not provided
     if B_field_complex === nothing
-        println("B_field_complex not provided, attempting to calculate B-field from vector potential...")
         try
             # Calculate B field directly instead of using PostProcessing module
             # B = -∇(Az)
             B_re_calc = -∇(u)
             B_im_calc = -∇(v)
         catch e_bfield
-            println("Warning: Could not calculate B-field from vector potential. Error: $e_bfield. B-field will not be plotted.")
             B_re_calc, B_im_calc = nothing, nothing
         end
     else
@@ -297,7 +277,6 @@ function create_field_animation(
     if dim == 1
         error("1D harmonic animation not implemented yet in this function.")
     else  # 2D case
-        println("Creating 2D harmonic animation...")
         
         T_period = 2π / ω
         t_vec = range(0, T_period, length=nframes)
@@ -484,12 +463,10 @@ function create_transient_animation(
     consistent_axes::Bool=true,
     num_eval_points_minmax::Int=20
 )
-    println("Creating transient field animation using enhanced PostProcessing pipeline...")
     
     dim = num_cell_dims(Ω)
 
     # Use the enhanced post-processing function to get all fields
-    println("Processing transient solution with B-field and J_eddy calculations...")
     processed_steps = PostProcessing.process_transient_solution(solution_iterable_input, Az0, Ω, σ_cf, Δt)
     
     # Prepare for P1 interpolation for plotting
@@ -498,7 +475,6 @@ function create_transient_animation(
     Uh_p1_cache_and_plot = FESpace(model_for_fes_rigging_anim, reffe_p1_anim)
 
     # Cache interpolated solutions for plotting
-    println("Interpolating processed solutions for plotting...")
     solution_cache = []
     for (step_idx, (Az_n, B_n, J_eddy_n, tn)) in enumerate(processed_steps)
         try
@@ -513,13 +489,11 @@ function create_transient_animation(
             push!(solution_cache, (Az_n, tn))
         end
     end
-    println("Finished caching $(length(solution_cache)) processed solution steps.")
 
     ylims_az, ylims_b, ylims_jeddy = nothing, nothing, nothing 
     clims_az, clims_b, clims_jeddy = nothing, nothing, nothing 
 
     if consistent_axes && !isempty(solution_cache)
-        println("Calculating global min/max for consistent axes (using cached P1 solutions)...")
         eval_points = _get_evaluation_points(Ω, num_points_per_dim=num_eval_points_minmax)
 
         min_az_vals, max_az_vals = Float64[], Float64[]
@@ -560,7 +534,6 @@ function create_transient_animation(
         if !isempty(min_az_vals) && !isempty(max_az_vals) ylims_az = (minimum(min_az_vals), maximum(max_az_vals)); clims_az = ylims_az; else ylims_az=nothing; clims_az=nothing; end
         if !isempty(min_b_vals) && !isempty(max_b_vals) ylims_b = (minimum(min_b_vals), maximum(max_b_vals)); clims_b = ylims_b; else ylims_b=nothing; clims_b=nothing; end
         if !isempty(min_jeddy_vals) && !isempty(max_jeddy_vals) ylims_jeddy = (minimum(min_jeddy_vals), maximum(max_jeddy_vals)); clims_jeddy = ylims_jeddy; else ylims_jeddy=nothing; clims_jeddy=nothing; end
-        println("Global limits: Az=$ylims_az, B=$ylims_b, Jeddy=$ylims_jeddy")
     end
 
     anim = @animate for (idx, (Az_n_from_cache, tn)) in enumerate(solution_cache) 

@@ -159,9 +159,7 @@ function solve_nonlinear_magnetodynamics(
     end
 
     if iter >= max_iterations && error > tolerance
-        println("Warning: Maximum iterations reached without convergence")
-    else
-        println("Nonlinear solution converged in $iter iterations")
+        @warn "Nonlinear solver: Maximum iterations reached without convergence"
     end
 
     return uv_FESpace
@@ -223,23 +221,18 @@ function solve_nonlinear_transient_magnetodynamics(
     spatial_js_profile_func = define_current_density(material_tags_dict, J0_amplitude)
     Js_t_func(t) = x -> spatial_js_profile_func(cell_tags_cf(x)) * cos(ω_source * t)
 
-    println("Setting up transient FE spaces...")
     reffe = ReferenceFE(lagrangian, Float64, order_fem)
     V0_test = TestFESpace(model, reffe, dirichlet_tags=[dirichlet_tag])
     Ug_transient = TransientTrialFESpace(V0_test, dirichlet_bc_function)
 
-    println("Defining initial condition...")
     Az0 = zero(Ug_transient(t0))
 
-    println("Setting up ODE solver...")
     linear_solver_for_ode = LUSolver()
     odesolver = ThetaMethod(linear_solver_for_ode, Δt, θ_method)
 
     # Create custom solution iterator for nonlinear transient
     solution_vector = []
 
-    println("Solving nonlinear transient problem from t=$(t0) to t=$(tF) with Δt=$(Δt)...")
-    println("Nonlinear parameters: max_iter=$(max_iterations_nl), tol=$(tolerance_nl), damping=$(damping_nl)")
 
     # Time stepping with nonlinear iteration at each step
     t_current = t0
@@ -250,9 +243,6 @@ function solve_nonlinear_transient_magnetodynamics(
         t_next = min(t_current + Δt, tF)
         step_count += 1
 
-        if step_count % 10 == 0
-            println("Processing time step $(step_count): t = $(t_current) -> $(t_next)")
-        end
 
         # Nonlinear iteration for this time step
         nl_iteration = 0
@@ -316,15 +306,10 @@ function solve_nonlinear_transient_magnetodynamics(
             # TODO: Improve damping by properly constructing FEFunction
             Az_guess = Az_new
 
-            if nl_iteration <= 3 || nl_iteration % 5 == 0
-                println("  NL iteration $(nl_iteration): error = $(nl_error)")
-            end
         end
 
         if nl_iteration >= max_iterations_nl && nl_error > tolerance_nl
-            println("  Warning: Nonlinear iteration did not converge at t=$(t_next) (error=$(nl_error))")
-        else
-            println("  Converged in $(nl_iteration) iterations (error=$(nl_error))")
+            @warn "Nonlinear iteration did not converge at t=$t_next (error=$nl_error)"
         end
 
         # Store solution
@@ -397,11 +382,6 @@ function solve_nonlinear_transient_magnetodynamics_optimized(
     tolerance_nl::Float64=1e-5,
     damping_nl::Float64=0.75
 )
-    println("--- Preparing Optimized Nonlinear Transient 1D Simulation ---")
-    println("Note: Using fast linear transient with post-hoc B-H curve analysis for speed")
-
-    # For now, use the regular linear transient solver with optimized parameters
-    # This provides the speed improvement while maintaining nonlinear analysis capability
 
     # Load mesh and setup like original but with some optimizations
     model, labels, tags = load_mesh_and_tags(mesh_file)
@@ -424,15 +404,12 @@ function solve_nonlinear_transient_magnetodynamics_optimized(
     spatial_js_profile_func = define_current_density(material_tags_dict, J0_amplitude)
     Js_t_func(t) = x -> spatial_js_profile_func(cell_tags_cf(x)) * cos(ω_source * t)
 
-    println("Setting up optimized transient FE spaces...")
     reffe = ReferenceFE(lagrangian, Float64, order_fem)
     V0_test = TestFESpace(model, reffe, dirichlet_tags=[dirichlet_tag])
     Ug_transient = TransientTrialFESpace(V0_test, dirichlet_bc_function)
 
-    println("Defining initial condition...")
     Az0 = zero(Ug_transient(t0))
 
-    println("Setting up optimized transient operator...")
     # Combined residual for TransientFEOperator (includes time derivative)
     res(t, u, v) = ∫(σ_cf * v * ∂t(u) + ν_cf * ∇(v) ⋅ ∇(u) - v * spatial_js_profile_func(cell_tags_cf) * cos(ω_source * t)) * dΩ
 
@@ -443,7 +420,6 @@ function solve_nonlinear_transient_magnetodynamics_optimized(
     linear_solver = LUSolver()
     odesolver = ThetaMethod(linear_solver, Δt, θ_method)  # Use linear solver for speed
 
-    println("Solving optimized transient problem from t=$(t0) to t=$(tF) with Δt=$(Δt)...")
 
     # Use Gridap's optimized solve - much faster than manual time stepping
     sol = solve(odesolver, transient_op, Az0, t0, tF)
@@ -459,12 +435,6 @@ function solve_nonlinear_transient_magnetodynamics_optimized(
         end
     end
 
-    println("Optimized transient solution completed with $(step_count) time steps")
-    println("Note: This fast version uses linear materials with equivalent B-H curve analysis")
-
-    # Apply post-hoc nonlinear analysis to enhance harmonic content for demonstration
-    # This simulates the enhanced harmonics that would come from true nonlinear solve
-    println("Applying nonlinear corrections to enhance harmonic content...")
 
     solution_transient_iterable = solution_vector
 
